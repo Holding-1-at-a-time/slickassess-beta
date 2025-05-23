@@ -223,7 +223,7 @@ export class GoogleCalendarClient {
           timeZone: "UTC",
         }
       }
-      if (updates.status) event.status = updates.status
+      if (updates.status) {
 
       await this.calendar!.events.patch({
         calendarId,
