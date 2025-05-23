@@ -1,3 +1,5 @@
+"use client"
+
 import { ConvexReactClient } from "convex/react"
 import { ConvexProvider } from "convex/react"
 import { api } from "@/convex/_generated/api"
