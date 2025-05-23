@@ -1,0 +1,13 @@
+{
+  "project": "slickassess",
+  "team": "your-team-name",
+  "prodUrl": "https://eager-antelope-123.convex.cloud",
+  "functions": {
+    "path": "./convex",
+    "autoWatchModules": true
+  },
+  "authInfo": {
+    "domain": "https://your-auth-domain.com",
+    "applicationID": "your-application-id"
+  }
+}
