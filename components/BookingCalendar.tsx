@@ -24,21 +24,15 @@ export function BookingCalendar({ tenantId }: BookingCalendarProps) {
   const startDate = moment(date).startOf("month").toISOString()
   const endDate = moment(date).endOf("month").toISOString()
 
-  // Fetch bookings, initialize to empty array in case of errors
-  let bookings = []
-  try {
-    const queryResult = useQuery(api.queries.listBookingsByDateRange, {
-      startDate,
-      endDate,
-      tenantId,
-    })
+  // Fetch bookings
+  const queryResult = useQuery(api.queries.listBookingsByDateRange, {
+    startDate,
+    endDate,
+    tenantId,
+  })
 
-    if (queryResult) {
-      bookings = queryResult
-    }
-  } catch (error) {
-    console.error("Error fetching bookings:", error)
-  }
+  // Initialize bookings to empty array in case of errors or null queryResult
+  const bookings = queryResult || []
 
   // Convert bookings to calendar events
   const events =
