@@ -3,10 +3,9 @@ import { Together } from "together-ai"
 import { fetchAvailableSlots } from "@/convex/functions/fetchAvailableSlots"
 import { createBooking } from "@/convex/functions/createBooking"
 
-// Initialize the Together AI client
-const together = new Together({
-  apiKey: process.env.TOGETHER_API_KEY,
-})
+// Initialize the Together AI client with validation
+const apiKey = process.env.TOGETHER_API_KEY
+const together = apiKey ? new Together({ apiKey }) : null
 
 // Define the tools that the AI can use
 const tools = [
@@ -87,50 +86,111 @@ const tools = [
 ]
 
 export async function POST(req: Request) {
-  // Extract the messages from the request
-  const { messages, tenantId, vehicleId } = await req.json()
+  try {
+    // Check if Together AI client is initialized
+    if (!together) {
+      console.error("Together AI client not initialized - missing API key")
+      return Response.redirect(new URL("/api/chat/fallback", req.url), 307)
+    }
 
-  // Create a stream using the new AI SDK 4.0 syntax
-  const result = await streamText({
-    model: together.chat("Qwen/Qwen2-1.5B-Instruct"),
-    messages,
-    tools,
-    toolChoice: "auto",
-    onToolCall: async (toolCall) => {
-      const { name, arguments: args } = toolCall.function
+    // Extract the messages from the request
+    const { messages, tenantId, vehicleId } = await req.json()
 
-      if (name === "fetchAvailableSlots") {
-        const parsedArgs = JSON.parse(args)
-        const slots = await fetchAvailableSlots({
-          startDate: parsedArgs.startDate,
-          endDate: parsedArgs.endDate,
-          duration: parsedArgs.duration,
-        })
+    // Validate required parameters
+    if (!messages || !Array.isArray(messages)) {
+      return new Response(JSON.stringify({ error: "Invalid messages format" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      })
+    }
 
-        return { slots }
-      }
+    // Create a stream using the new AI SDK 4.0 syntax
+    try {
+      const result = await streamText({
+        model: together.chat("Qwen/Qwen2-1.5B-Instruct"),
+        messages,
+        tools,
+        toolChoice: "auto",
+        onToolCall: async (toolCall) => {
+          try {
+            const { name, arguments: args } = toolCall.function
 
-      if (name === "createBooking") {
-        const parsedArgs = JSON.parse(args)
-        const result = await createBooking({
-          tenantId: tenantId || parsedArgs.tenantId,
-          vehicleId: vehicleId || parsedArgs.vehicleId,
-          serviceType: parsedArgs.serviceType,
-          startTime: parsedArgs.startTime,
-          endTime: parsedArgs.endTime,
-          notes: parsedArgs.notes,
-          customerEmail: parsedArgs.customerEmail,
-          customerName: parsedArgs.customerName,
-          customerPhone: parsedArgs.customerPhone,
-        })
+            if (name === "fetchAvailableSlots") {
+              try {
+                const parsedArgs = JSON.parse(args)
+                const slots = await fetchAvailableSlots({
+                  startDate: parsedArgs.startDate,
+                  endDate: parsedArgs.endDate,
+                  duration: parsedArgs.duration,
+                })
+                return { slots }
+              } catch (error) {
+                console.error("Error fetching available slots:", error)
+                return {
+                  error: "Failed to fetch available slots",
+                  slots: [],
+                }
+              }
+            }
 
-        return { bookingId: result.bookingId, googleEventId: result.googleEventId }
-      }
+            if (name === "createBooking") {
+              try {
+                const parsedArgs = JSON.parse(args)
 
-      return { error: `Unknown tool: ${name}` }
-    },
-  })
+                // Validate required parameters
+                if (!tenantId && !parsedArgs.tenantId) {
+                  return { error: "Missing tenantId parameter" }
+                }
 
-  // Convert the result to a stream response
-  return result.toDataStreamResponse()
+                if (!vehicleId && !parsedArgs.vehicleId) {
+                  return { error: "Missing vehicleId parameter" }
+                }
+
+                const result = await createBooking({
+                  tenantId: tenantId || parsedArgs.tenantId,
+                  vehicleId: vehicleId || parsedArgs.vehicleId,
+                  serviceType: parsedArgs.serviceType,
+                  startTime: parsedArgs.startTime,
+                  endTime: parsedArgs.endTime,
+                  notes: parsedArgs.notes,
+                  customerEmail: parsedArgs.customerEmail,
+                  customerName: parsedArgs.customerName,
+                  customerPhone: parsedArgs.customerPhone,
+                })
+
+                return {
+                  success: true,
+                  bookingId: result.bookingId,
+                  googleEventId: result.googleEventId,
+                }
+              } catch (error) {
+                console.error("Error creating booking:", error)
+                return {
+                  error: "Failed to create booking",
+                  details: error instanceof Error ? error.message : "Unknown error",
+                }
+              }
+            }
+
+            return { error: `Unknown tool: ${name}` }
+          } catch (error) {
+            console.error("Error in tool call:", error)
+            return { error: "Tool call failed" }
+          }
+        },
+      })
+
+      // Convert the result to a stream response
+      return result.toDataStreamResponse()
+    } catch (error) {
+      console.error("Error in AI stream:", error)
+      return Response.redirect(new URL("/api/chat/fallback", req.url), 307)
+    }
+  } catch (error) {
+    console.error("Error in chat API:", error)
+    return new Response(JSON.stringify({ error: "Internal server error" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    })
+  }
 }

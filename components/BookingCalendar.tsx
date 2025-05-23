@@ -18,8 +18,32 @@ export function BookingCalendar({ tenantId }: BookingCalendarProps) {
   const [view, setView] = useState(Views.WEEK)
   const [date, setDate] = useState(new Date())
 
-  // For now, use mock data since Convex might not be connected
-  const events: any[] = []
+  // Mock data for development purposes
+  const events = [
+    {
+      id: 1,
+      title: "Regular Maintenance - Toyota Camry",
+      start: new Date(new Date().setHours(10, 0, 0, 0)),
+      end: new Date(new Date().setHours(11, 30, 0, 0)),
+      status: "confirmed",
+    },
+    {
+      id: 2,
+      title: "Tire Replacement - Honda Accord",
+      start: new Date(new Date().setDate(new Date().getDate() + 1)),
+      start: new Date(new Date().setHours(14, 0, 0, 0)),
+      end: new Date(new Date().setHours(16, 0, 0, 0)),
+      status: "pending",
+    },
+    {
+      id: 3,
+      title: "Oil Change - Ford F-150",
+      start: new Date(new Date().setDate(new Date().getDate() + 2)),
+      start: new Date(new Date().setHours(9, 0, 0, 0)),
+      end: new Date(new Date().setHours(10, 0, 0, 0)),
+      status: "confirmed",
+    },
+  ]
 
   // Custom event styling based on status
   const eventStyleGetter = (event: any) => {

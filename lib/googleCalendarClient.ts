@@ -1,16 +1,38 @@
 import { google, type calendar_v3 } from "googleapis"
 
 export class GoogleCalendarClient {
-  private calendar: calendar_v3.Calendar
+  private calendar: calendar_v3.Calendar | null = null
 
   constructor() {
-    const auth = new google.auth.JWT({
-      email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-      scopes: ["https://www.googleapis.com/auth/calendar"],
-    })
+    try {
+      // Validate required environment variables
+      const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
+      const privateKey = process.env.GOOGLE_PRIVATE_KEY
+      const calendarId = process.env.GOOGLE_CALENDAR_ID
 
-    this.calendar = google.calendar({ version: "v3", auth })
+      if (!email || !privateKey || !calendarId) {
+        console.error("Missing required Google Calendar environment variables")
+        return
+      }
+
+      // Create auth client
+      const auth = new google.auth.JWT({
+        email,
+        key: privateKey.replace(/\\n/g, "\n"),
+        scopes: ["https://www.googleapis.com/auth/calendar"],
+      })
+
+      this.calendar = google.calendar({ version: "v3", auth })
+    } catch (error) {
+      console.error("Error initializing Google Calendar client:", error)
+      // Don't expose the actual error details which might contain sensitive info
+    }
+  }
+
+  private validateCalendarClient() {
+    if (!this.calendar) {
+      throw new Error("Google Calendar client not initialized properly")
+    }
   }
 
   async getAvailableSlots(
@@ -19,6 +41,8 @@ export class GoogleCalendarClient {
     duration: number, // in minutes
   ): Promise<{ startTime: string; endTime: string }[]> {
     try {
+      this.validateCalendarClient()
+
       // Get busy times from calendar
       const busyTimes = await this.getBusyTimes(startDate, endDate)
 
@@ -28,28 +52,36 @@ export class GoogleCalendarClient {
       return availableSlots
     } catch (error) {
       console.error("Error fetching available slots:", error)
-      throw error
+      // Return empty array instead of throwing to prevent service disruption
+      return []
     }
   }
 
   private async getBusyTimes(startDate: string, endDate: string): Promise<{ start: string; end: string }[]> {
     try {
-      const response = await this.calendar.freebusy.query({
+      this.validateCalendarClient()
+
+      const calendarId = process.env.GOOGLE_CALENDAR_ID
+      if (!calendarId) {
+        throw new Error("Missing GOOGLE_CALENDAR_ID environment variable")
+      }
+
+      const response = await this.calendar!.freebusy.query({
         requestBody: {
           timeMin: startDate,
           timeMax: endDate,
-          items: [{ id: process.env.GOOGLE_CALENDAR_ID }],
+          items: [{ id: calendarId }],
         },
       })
 
-      const busyTimes = response.data.calendars?.[process.env.GOOGLE_CALENDAR_ID!]?.busy || []
+      const busyTimes = response.data.calendars?.[calendarId]?.busy || []
       return busyTimes.map((time) => ({
         start: time.start || "",
         end: time.end || "",
       }))
     } catch (error) {
       console.error("Error fetching busy times:", error)
-      throw error
+      return []
     }
   }
 
@@ -122,6 +154,13 @@ export class GoogleCalendarClient {
     attendeeEmail?: string,
   ): Promise<string> {
     try {
+      this.validateCalendarClient()
+
+      const calendarId = process.env.GOOGLE_CALENDAR_ID
+      if (!calendarId) {
+        throw new Error("Missing GOOGLE_CALENDAR_ID environment variable")
+      }
+
       const event: calendar_v3.Schema$Event = {
         summary,
         description,
@@ -139,15 +178,15 @@ export class GoogleCalendarClient {
         event.attendees = [{ email: attendeeEmail }]
       }
 
-      const response = await this.calendar.events.insert({
-        calendarId: process.env.GOOGLE_CALENDAR_ID,
+      const response = await this.calendar!.events.insert({
+        calendarId,
         requestBody: event,
       })
 
       return response.data.id || ""
     } catch (error) {
       console.error("Error creating event:", error)
-      throw error
+      throw new Error("Failed to create calendar event")
     }
   }
 
@@ -162,6 +201,13 @@ export class GoogleCalendarClient {
     },
   ): Promise<void> {
     try {
+      this.validateCalendarClient()
+
+      const calendarId = process.env.GOOGLE_CALENDAR_ID
+      if (!calendarId) {
+        throw new Error("Missing GOOGLE_CALENDAR_ID environment variable")
+      }
+
       const event: calendar_v3.Schema$Event = {}
 
       if (updates.summary) event.summary = updates.summary
@@ -180,26 +226,33 @@ export class GoogleCalendarClient {
       }
       if (updates.status) event.status = updates.status
 
-      await this.calendar.events.patch({
-        calendarId: process.env.GOOGLE_CALENDAR_ID,
+      await this.calendar!.events.patch({
+        calendarId,
         eventId,
         requestBody: event,
       })
     } catch (error) {
       console.error("Error updating event:", error)
-      throw error
+      throw new Error("Failed to update calendar event")
     }
   }
 
   async deleteEvent(eventId: string): Promise<void> {
     try {
-      await this.calendar.events.delete({
-        calendarId: process.env.GOOGLE_CALENDAR_ID,
+      this.validateCalendarClient()
+
+      const calendarId = process.env.GOOGLE_CALENDAR_ID
+      if (!calendarId) {
+        throw new Error("Missing GOOGLE_CALENDAR_ID environment variable")
+      }
+
+      await this.calendar!.events.delete({
+        calendarId,
         eventId,
       })
     } catch (error) {
       console.error("Error deleting event:", error)
-      throw error
+      throw new Error("Failed to delete calendar event")
     }
   }
 
@@ -245,15 +298,22 @@ export class GoogleCalendarClient {
 
   async getEvent(eventId: string): Promise<calendar_v3.Schema$Event> {
     try {
-      const response = await this.calendar.events.get({
-        calendarId: process.env.GOOGLE_CALENDAR_ID,
+      this.validateCalendarClient()
+
+      const calendarId = process.env.GOOGLE_CALENDAR_ID
+      if (!calendarId) {
+        throw new Error("Missing GOOGLE_CALENDAR_ID environment variable")
+      }
+
+      const response = await this.calendar!.events.get({
+        calendarId,
         eventId,
       })
 
       return response.data
     } catch (error) {
       console.error("Error getting event:", error)
-      throw error
+      throw new Error("Failed to get calendar event")
     }
   }
 }

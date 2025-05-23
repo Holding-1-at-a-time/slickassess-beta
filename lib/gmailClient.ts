@@ -1,4 +1,5 @@
 import { google } from "googleapis"
+import { getEnvVar } from "./env"
 
 interface EmailOptions {
   to: string
@@ -10,14 +11,27 @@ interface EmailOptions {
 
 export async function sendEmail(options: EmailOptions): Promise<string> {
   try {
+    // Validate required environment variables
+    const emailAddress = getEnvVar("GOOGLE_SERVICE_ACCOUNT_EMAIL")
+    const privateKey = getEnvVar("GOOGLE_PRIVATE_KEY")
+
+    if (!emailAddress || !privateKey) {
+      throw new Error("Missing required Gmail environment variables")
+    }
+
     const auth = new google.auth.JWT({
-      email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+      email: emailAddress,
+      key: privateKey.replace(/\\n/g, "\n"),
       scopes: ["https://www.googleapis.com/auth/gmail.send"],
-      subject: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL, // Impersonate this user
+      subject: emailAddress, // Impersonate this user
     })
 
     const gmail = google.gmail({ version: "v1", auth })
+
+    // Validate email parameters
+    if (!options.to || !options.subject) {
+      throw new Error("Missing required email parameters")
+    }
 
     // Create the email content
     const emailLines = [
@@ -25,7 +39,7 @@ export async function sendEmail(options: EmailOptions): Promise<string> {
       `Subject: ${options.subject}`,
       "Content-Type: text/html; charset=utf-8",
       "",
-      options.body,
+      options.body || "No content provided",
     ]
 
     if (options.cc) {
@@ -36,8 +50,8 @@ export async function sendEmail(options: EmailOptions): Promise<string> {
       emailLines.splice(1, 0, `Bcc: ${options.bcc}`)
     }
 
-    const email = emailLines.join("\r\n")
-    const encodedEmail = Buffer.from(email)
+    const rawEmail = emailLines.join("\r\n")
+    const encodedEmail = Buffer.from(rawEmail)
       .toString("base64")
       .replace(/\+/g, "-")
       .replace(/\//g, "_")
@@ -54,6 +68,7 @@ export async function sendEmail(options: EmailOptions): Promise<string> {
     return res.data.id || ""
   } catch (error) {
     console.error("Error sending email:", error)
-    throw error
+    // Don't expose the actual error which might contain sensitive info
+    throw new Error("Failed to send email")
   }
 }
