@@ -47,7 +47,6 @@
     "convex": "latest",
     "date-fns": "4.1.0",
     "embla-carousel-react": "8.5.1",
-    "google-auth-library": "latest",
     "googleapis": "latest",
     "input-otp": "1.4.1",
     "lucide-react": "^0.454.0",
@@ -64,6 +63,7 @@
     "sonner": "^1.7.1",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
+    "together-ai": "latest",
     "vaul": "^0.9.6",
     "zod": "^3.24.1"
   },

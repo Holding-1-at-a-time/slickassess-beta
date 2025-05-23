@@ -1,55 +1,52 @@
-import { cronJobs } from "convex/server"
-import { internal } from "./_generated/api"
-import { internalAction } from "./_generated/server"
+import { internalAction } from "../_generated/server"
+import { sendEmail } from "../../lib/gmailClient"
 
-// Register the cron job to run every day at 8 AM
-const sendRemindersJob = cronJobs.daily(
-  {
-    hour: 8, // 8 AM
-    minute: 0,
-  },
-  internal.sendBookingReminders.sendDailyReminders,
-)
-
-export const sendDailyReminders = internalAction({
+// This function would be scheduled to run daily
+export const sendBookingReminders = internalAction({
+  args: {},
   handler: async (ctx) => {
-    // Get all bookings scheduled for tomorrow
-    const tomorrow = new Date()
-    tomorrow.setDate(tomorrow.getDate() + 1)
-    tomorrow.setHours(0, 0, 0, 0)
+    try {
+      // Get bookings for tomorrow
+      const tomorrow = new Date()
+      tomorrow.setDate(tomorrow.getDate() + 1)
+      tomorrow.setHours(0, 0, 0, 0)
 
-    const dayAfterTomorrow = new Date(tomorrow)
-    dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 1)
+      const tomorrowEnd = new Date(tomorrow)
+      tomorrowEnd.setHours(23, 59, 59, 999)
 
-    const tomorrowStart = tomorrow.getTime()
-    const tomorrowEnd = dayAfterTomorrow.getTime()
+      const bookings = await ctx.runQuery("listBookingsByDateRange", {
+        startDate: tomorrow.toISOString(),
+        endDate: tomorrowEnd.toISOString(),
+        status: "confirmed",
+      })
 
-    // Query bookings for tomorrow that haven't had reminders sent
-    const bookingsToRemind = await ctx.runQuery(internal.queries.getBookingsForReminders, {
-      startTime: tomorrowStart,
-      endTime: tomorrowEnd,
-    })
-
-    // Send reminders for each booking
-    for (const booking of bookingsToRemind) {
-      try {
-        await ctx.runAction(internal.actions.sendBookingReminderEmail, {
-          bookingId: booking._id,
-          tenantId: booking.tenantId,
-          vehicleId: booking.vehicleId,
-          serviceType: booking.serviceType,
-          startTime: booking.startTime,
-        })
-
-        // Mark reminder as sent
-        await ctx.runMutation(internal.mutations.markReminderSent, {
-          bookingId: booking._id,
-        })
-      } catch (error) {
-        console.error(`Failed to send reminder for booking ${booking._id}:`, error)
+      // Send reminder for each booking
+      for (const booking of bookings) {
+        if (booking.customerEmail) {
+          await sendEmail({
+            to: booking.customerEmail,
+            subject: `Reminder: Your appointment tomorrow at ${new Date(booking.startTime).toLocaleTimeString()}`,
+            body: `
+              <h2>Appointment Reminder</h2>
+              <p>This is a friendly reminder about your appointment tomorrow:</p>
+              <ul>
+                <li><strong>Service:</strong> ${booking.serviceType}</li>
+                <li><strong>Time:</strong> ${new Date(booking.startTime).toLocaleString()}</li>
+                <li><strong>Duration:</strong> ${Math.round(
+                  (new Date(booking.endTime).getTime() - new Date(booking.startTime).getTime()) / 60000,
+                )} minutes</li>
+              </ul>
+              <p>If you need to reschedule, please contact us as soon as possible.</p>
+              <p>Thank you!</p>
+            `,
+          })
+        }
       }
-    }
 
-    return { success: true, remindersCount: bookingsToRemind.length }
+      return { success: true, remindersSent: bookings.length }
+    } catch (error) {
+      console.error("Error sending booking reminders:", error)
+      throw new Error(`Failed to send booking reminders: ${error}`)
+    }
   },
 })

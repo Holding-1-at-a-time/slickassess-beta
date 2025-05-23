@@ -1,33 +1,23 @@
+import { action } from "../_generated/server"
 import { v } from "convex/values"
-import { action } from "./_generated/server"
 import { GoogleCalendarClient } from "../../lib/googleCalendarClient"
 
-export default action({
+export const fetchAvailableSlots = action({
   args: {
-    tenantId: v.string(),
-    startDate: v.string(), // ISO string
-    endDate: v.string(), // ISO string
-    duration: v.number(), // in minutes
+    startDate: v.string(),
+    endDate: v.string(),
+    duration: v.number(),
   },
   handler: async (ctx, args) => {
-    // In a real implementation, you would fetch the tenant's calendar ID from the database
-    // For now, we'll use the environment variable
-    const calendarId = process.env.GOOGLE_CALENDAR_ID || ""
+    try {
+      const googleCalendarClient = new GoogleCalendarClient()
 
-    if (!calendarId) {
-      throw new Error("Calendar ID not configured for this tenant")
+      const availableSlots = await googleCalendarClient.getAvailableSlots(args.startDate, args.endDate, args.duration)
+
+      return availableSlots
+    } catch (error) {
+      console.error("Error fetching available slots:", error)
+      throw new Error(`Failed to fetch available slots: ${error}`)
     }
-
-    const calendarClient = new GoogleCalendarClient(calendarId)
-
-    const startDate = new Date(args.startDate)
-    const endDate = new Date(args.endDate)
-
-    const availableSlots = await calendarClient.getAvailableSlots(startDate, endDate, args.duration)
-
-    return availableSlots.map((slot) => ({
-      start: slot.start.toISOString(),
-      end: slot.end.toISOString(),
-    }))
   },
 })

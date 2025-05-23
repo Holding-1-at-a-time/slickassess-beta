@@ -1,150 +1,109 @@
 import { google, type calendar_v3 } from "googleapis"
-import { JWT } from "google-auth-library"
-
-export interface CalendarSlot {
-  start: Date
-  end: Date
-}
-
-export interface BookingDetails {
-  summary: string
-  description: string
-  startTime: Date
-  endTime: Date
-  attendeeEmail?: string
-}
 
 export class GoogleCalendarClient {
   private calendar: calendar_v3.Calendar
-  private calendarId: string
 
-  constructor(calendarId: string) {
-    const credentials = {
+  constructor() {
+    const auth = new google.auth.JWT({
       email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
       key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
       scopes: ["https://www.googleapis.com/auth/calendar"],
-    }
+    })
 
-    const auth = new JWT(credentials)
     this.calendar = google.calendar({ version: "v3", auth })
-    this.calendarId = calendarId
   }
 
   async getAvailableSlots(
-    startDate: Date,
-    endDate: Date,
+    startDate: string,
+    endDate: string,
     duration: number, // in minutes
-  ): Promise<CalendarSlot[]> {
+  ): Promise<{ startTime: string; endTime: string }[]> {
     try {
-      // Get busy times from the calendar
-      const busyTimesResponse = await this.calendar.freebusy.query({
-        requestBody: {
-          timeMin: startDate.toISOString(),
-          timeMax: endDate.toISOString(),
-          items: [{ id: this.calendarId }],
-        },
-      })
+      // Get busy times from calendar
+      const busyTimes = await this.getBusyTimes(startDate, endDate)
 
-      const busyTimes = busyTimesResponse.data.calendars?.[this.calendarId]?.busy || []
+      // Generate available time slots based on business hours and busy times
+      const availableSlots = this.generateAvailableSlots(startDate, endDate, duration, busyTimes)
 
-      // Generate all possible slots based on business hours
-      const slots = this.generateTimeSlots(startDate, endDate, duration)
-
-      // Filter out busy slots
-      return this.filterAvailableSlots(slots, busyTimes, duration)
+      return availableSlots
     } catch (error) {
       console.error("Error fetching available slots:", error)
-      throw new Error("Failed to fetch available slots from Google Calendar")
+      throw error
     }
   }
 
-  async createEvent(bookingDetails: BookingDetails): Promise<string> {
+  private async getBusyTimes(startDate: string, endDate: string): Promise<{ start: string; end: string }[]> {
     try {
-      const event = {
-        summary: bookingDetails.summary,
-        description: bookingDetails.description,
-        start: {
-          dateTime: bookingDetails.startTime.toISOString(),
+      const response = await this.calendar.freebusy.query({
+        requestBody: {
+          timeMin: startDate,
+          timeMax: endDate,
+          items: [{ id: process.env.GOOGLE_CALENDAR_ID }],
         },
-        end: {
-          dateTime: bookingDetails.endTime.toISOString(),
-        },
-        attendees: bookingDetails.attendeeEmail ? [{ email: bookingDetails.attendeeEmail }] : undefined,
-      }
-
-      const response = await this.calendar.events.insert({
-        calendarId: this.calendarId,
-        requestBody: event,
       })
 
-      return response.data.id || ""
+      const busyTimes = response.data.calendars?.[process.env.GOOGLE_CALENDAR_ID!]?.busy || []
+      return busyTimes.map((time) => ({
+        start: time.start || "",
+        end: time.end || "",
+      }))
     } catch (error) {
-      console.error("Error creating calendar event:", error)
-      throw new Error("Failed to create event in Google Calendar")
+      console.error("Error fetching busy times:", error)
+      throw error
     }
   }
 
-  async updateEvent(eventId: string, bookingDetails: Partial<BookingDetails>): Promise<void> {
-    try {
-      const event: any = {}
+  private generateAvailableSlots(
+    startDate: string,
+    endDate: string,
+    duration: number,
+    busyTimes: { start: string; end: string }[],
+  ): { startTime: string; endTime: string }[] {
+    const slots: { startTime: string; endTime: string }[] = []
+    const startDateTime = new Date(startDate)
+    const endDateTime = new Date(endDate)
 
-      if (bookingDetails.summary) event.summary = bookingDetails.summary
-      if (bookingDetails.description) event.description = bookingDetails.description
-      if (bookingDetails.startTime) event.start = { dateTime: bookingDetails.startTime.toISOString() }
-      if (bookingDetails.endTime) event.end = { dateTime: bookingDetails.endTime.toISOString() }
+    // Loop through each day
+    const currentDate = new Date(startDateTime)
+    while (currentDate <= endDateTime) {
+      if (currentDate.getDay() !== 0 && currentDate.getDay() !== 6) {
+        // Skip weekends
+        // Business hours: 9 AM to 5 PM
+        const businessStart = new Date(currentDate)
+        businessStart.setHours(9, 0, 0, 0)
 
-      await this.calendar.events.patch({
-        calendarId: this.calendarId,
-        eventId: eventId,
-        requestBody: event,
-      })
-    } catch (error) {
-      console.error("Error updating calendar event:", error)
-      throw new Error("Failed to update event in Google Calendar")
-    }
-  }
+        const businessEnd = new Date(currentDate)
+        businessEnd.setHours(17, 0, 0, 0)
 
-  async deleteEvent(eventId: string): Promise<void> {
-    try {
-      await this.calendar.events.delete({
-        calendarId: this.calendarId,
-        eventId: eventId,
-      })
-    } catch (error) {
-      console.error("Error deleting calendar event:", error)
-      throw new Error("Failed to delete event from Google Calendar")
-    }
-  }
+        // Generate slots for the day
+        const slotStart = new Date(businessStart)
+        while (slotStart < businessEnd) {
+          const slotEnd = new Date(slotStart)
+          slotEnd.setMinutes(slotStart.getMinutes() + duration)
 
-  private generateTimeSlots(startDate: Date, endDate: Date, duration: number): CalendarSlot[] {
-    const slots: CalendarSlot[] = []
-    const currentDate = new Date(startDate)
+          if (slotEnd <= businessEnd) {
+            // Check if slot overlaps with any busy time
+            const isAvailable = !busyTimes.some((busyTime) => {
+              const busyStart = new Date(busyTime.start)
+              const busyEnd = new Date(busyTime.end)
+              return (
+                (slotStart >= busyStart && slotStart < busyEnd) ||
+                (slotEnd > busyStart && slotEnd <= busyEnd) ||
+                (slotStart <= busyStart && slotEnd >= busyEnd)
+              )
+            })
 
-    // Business hours: 9 AM to 5 PM
-    const businessStartHour = 9
-    const businessEndHour = 17
+            if (isAvailable) {
+              slots.push({
+                startTime: slotStart.toISOString(),
+                endTime: slotEnd.toISOString(),
+              })
+            }
+          }
 
-    while (currentDate < endDate) {
-      // Set to business start hour
-      currentDate.setHours(businessStartHour, 0, 0, 0)
-
-      // Generate slots for the day
-      const dayEnd = new Date(currentDate)
-      dayEnd.setHours(businessEndHour, 0, 0, 0)
-
-      while (currentDate < dayEnd) {
-        const slotEnd = new Date(currentDate)
-        slotEnd.setMinutes(currentDate.getMinutes() + duration)
-
-        if (slotEnd <= dayEnd) {
-          slots.push({
-            start: new Date(currentDate),
-            end: slotEnd,
-          })
+          // Move to next slot (30-minute increments)
+          slotStart.setMinutes(slotStart.getMinutes() + 30)
         }
-
-        // Move to next slot
-        currentDate.setMinutes(currentDate.getMinutes() + 30) // 30-minute increments
       }
 
       // Move to next day
@@ -155,24 +114,149 @@ export class GoogleCalendarClient {
     return slots
   }
 
-  private filterAvailableSlots(
-    slots: CalendarSlot[],
-    busyTimes: Array<{ start: string; end: string }>,
-    duration: number,
-  ): CalendarSlot[] {
-    return slots.filter((slot) => {
-      // Check if the slot overlaps with any busy time
-      return !busyTimes.some((busyTime) => {
-        const busyStart = new Date(busyTime.start)
-        const busyEnd = new Date(busyTime.end)
+  async createEvent(
+    summary: string,
+    description: string,
+    startTime: string,
+    endTime: string,
+    attendeeEmail?: string,
+  ): Promise<string> {
+    try {
+      const event: calendar_v3.Schema$Event = {
+        summary,
+        description,
+        start: {
+          dateTime: startTime,
+          timeZone: "UTC",
+        },
+        end: {
+          dateTime: endTime,
+          timeZone: "UTC",
+        },
+      }
 
-        // Check for overlap
-        return (
-          (slot.start >= busyStart && slot.start < busyEnd) || // Slot starts during busy time
-          (slot.end > busyStart && slot.end <= busyEnd) || // Slot ends during busy time
-          (slot.start <= busyStart && slot.end >= busyEnd) // Slot contains busy time
-        )
+      if (attendeeEmail) {
+        event.attendees = [{ email: attendeeEmail }]
+      }
+
+      const response = await this.calendar.events.insert({
+        calendarId: process.env.GOOGLE_CALENDAR_ID,
+        requestBody: event,
       })
-    })
+
+      return response.data.id || ""
+    } catch (error) {
+      console.error("Error creating event:", error)
+      throw error
+    }
+  }
+
+  async updateEvent(
+    eventId: string,
+    updates: {
+      summary?: string
+      description?: string
+      startTime?: string
+      endTime?: string
+      status?: string
+    },
+  ): Promise<void> {
+    try {
+      const event: calendar_v3.Schema$Event = {}
+
+      if (updates.summary) event.summary = updates.summary
+      if (updates.description) event.description = updates.description
+      if (updates.startTime) {
+        event.start = {
+          dateTime: updates.startTime,
+          timeZone: "UTC",
+        }
+      }
+      if (updates.endTime) {
+        event.end = {
+          dateTime: updates.endTime,
+          timeZone: "UTC",
+        }
+      }
+      if (updates.status) event.status = updates.status
+
+      await this.calendar.events.patch({
+        calendarId: process.env.GOOGLE_CALENDAR_ID,
+        eventId,
+        requestBody: event,
+      })
+    } catch (error) {
+      console.error("Error updating event:", error)
+      throw error
+    }
+  }
+
+  async deleteEvent(eventId: string): Promise<void> {
+    try {
+      await this.calendar.events.delete({
+        calendarId: process.env.GOOGLE_CALENDAR_ID,
+        eventId,
+      })
+    } catch (error) {
+      console.error("Error deleting event:", error)
+      throw error
+    }
+  }
+
+  async watchCalendar(
+    channelId: string,
+    address: string,
+    expiration?: string,
+  ): Promise<{ resourceId: string; expiration: string }> {
+    try {
+      const response = await this.calendar.events.watch({
+        calendarId: process.env.GOOGLE_CALENDAR_ID,
+        requestBody: {
+          id: channelId,
+          type: "web_hook",
+          address,
+          expiration,
+        },
+      })
+
+      return {
+        resourceId: response.data.resourceId || "",
+        expiration: response.data.expiration || "",
+      }
+    } catch (error) {
+      console.error("Error setting up calendar watch:", error)
+      throw error
+    }
+  }
+
+  async stopWatch(channelId: string, resourceId: string): Promise<void> {
+    try {
+      await this.calendar.channels.stop({
+        requestBody: {
+          id: channelId,
+          resourceId,
+        },
+      })
+    } catch (error) {
+      console.error("Error stopping calendar watch:", error)
+      throw error
+    }
+  }
+
+  async getEvent(eventId: string): Promise<calendar_v3.Schema$Event> {
+    try {
+      const response = await this.calendar.events.get({
+        calendarId: process.env.GOOGLE_CALENDAR_ID,
+        eventId,
+      })
+
+      return response.data
+    } catch (error) {
+      console.error("Error getting event:", error)
+      throw error
+    }
   }
 }
+
+// Singleton instance
+export const googleCalendarClient = new GoogleCalendarClient()

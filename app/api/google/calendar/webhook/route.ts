@@ -1,71 +1,37 @@
-import { type NextRequest, NextResponse } from "next/server"
-import { ConvexHttpClient } from "convex/browser"
-import { api } from "@/convex/_generated/api"
+import { NextResponse } from "next/server"
+import { updateBookingFromCalendarEvent } from "@/convex/functions/updateBookingFromCalendarEvent"
 
-// Initialize the Convex client
-const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL || "")
-
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
-    const body = await request.json()
-
-    // Verify the channel ID and resource ID
-    const channelId = request.headers.get("x-goog-channel-id")
-    const resourceId = request.headers.get("x-goog-resource-id")
-    const resourceState = request.headers.get("x-goog-resource-state")
+    // Verify the request is from Google
+    const channelId = request.headers.get("X-Goog-Channel-ID")
+    const resourceId = request.headers.get("X-Goog-Resource-ID")
+    const resourceState = request.headers.get("X-Goog-Resource-State")
 
     if (!channelId || !resourceId) {
-      return NextResponse.json({ error: "Invalid webhook request" }, { status: 400 })
+      return NextResponse.json({ error: "Invalid request" }, { status: 400 })
     }
 
     // Handle different resource states
-    switch (resourceState) {
-      case "sync":
-        // Initial sync message, no action needed
-        break
-
-      case "exists":
-        // Resource was updated
-        const resourceUri = request.headers.get("x-goog-resource-uri")
-        if (resourceUri) {
-          // Extract the event ID from the resource URI
-          const eventIdMatch = resourceUri.match(/events\/([^/?]+)/)
-          const eventId = eventIdMatch ? eventIdMatch[1] : null
-
-          if (eventId) {
-            // Update the booking in Convex
-            await convex.mutation(api.functions.handleCalendarEventUpdate, {
-              googleEventId: eventId,
-              eventData: body,
-            })
-          }
-        }
-        break
-
-      case "not_exists":
-        // Resource was deleted
-        // Handle event deletion in Convex
-        const deletedResourceUri = request.headers.get("x-goog-resource-uri")
-        if (deletedResourceUri) {
-          const eventIdMatch = deletedResourceUri.match(/events\/([^/?]+)/)
-          const eventId = eventIdMatch ? eventIdMatch[1] : null
-
-          if (eventId) {
-            // Update the booking status in Convex
-            await convex.mutation(api.functions.handleCalendarEventDeletion, {
-              googleEventId: eventId,
-            })
-          }
-        }
-        break
-
-      default:
-        console.warn(`Unhandled resource state: ${resourceState}`)
+    if (resourceState === "sync") {
+      // This is the initial sync message
+      console.log("Received sync notification for channel:", channelId)
+      return NextResponse.json({ status: "ok" })
     }
 
-    return NextResponse.json({ success: true })
+    if (resourceState === "exists" || resourceState === "not_exists") {
+      // Get the event details and update the booking
+      const eventId = request.headers.get("X-Goog-Resource-URI")?.split("/").pop()
+
+      if (eventId) {
+        // Update the booking based on the calendar event
+        await updateBookingFromCalendarEvent({ eventId })
+      }
+    }
+
+    return NextResponse.json({ status: "ok" })
   } catch (error) {
-    console.error("Error handling Google Calendar webhook:", error)
+    console.error("Error handling calendar webhook:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

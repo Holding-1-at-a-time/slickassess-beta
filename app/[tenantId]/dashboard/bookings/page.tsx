@@ -1,10 +1,10 @@
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Search, Plus } from "lucide-react"
-import { Input } from "@/components/ui/input"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { BookingCalendar } from "@/components/BookingCalendar"
 
 export default function BookingsPage({ params }: { params: { tenantId: string } }) {
@@ -77,7 +77,7 @@ export default function BookingsPage({ params }: { params: { tenantId: string } 
           <TabsTrigger value="calendar">Calendar View</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="list">
+        <TabsContent value="list" className="mt-4">
           <Card>
             <CardHeader>
               <CardTitle>Upcoming & Past Bookings</CardTitle>
@@ -144,7 +144,7 @@ export default function BookingsPage({ params }: { params: { tenantId: string } 
           </Card>
         </TabsContent>
 
-        <TabsContent value="calendar">
+        <TabsContent value="calendar" className="mt-4">
           <BookingCalendar tenantId={tenantId} />
         </TabsContent>
       </Tabs>
