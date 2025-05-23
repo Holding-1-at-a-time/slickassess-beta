@@ -258,5 +258,5 @@ export class GoogleCalendarClient {
   }
 }
 
-// Singleton instance
+// Export a singleton instance
 export const googleCalendarClient = new GoogleCalendarClient()
