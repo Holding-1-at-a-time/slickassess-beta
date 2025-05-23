@@ -49,7 +49,7 @@ export default function LandingPage() {
                   <Link href="/sign-up">
                     <Button size="lg">Get Started</Button>
                   </Link>
-                  <Link href="#demo">
+                  <Link href="/demo-tenant/dashboard">
                     <Button size="lg" variant="outline">
                       View Demo
                     </Button>
@@ -88,8 +88,8 @@ export default function LandingPage() {
                   description: "Comprehensive tools for vehicle assessments and inspections.",
                 },
                 {
-                  title: "Booking System",
-                  description: "Streamlined booking process for assessments and services.",
+                  title: "AI-Powered Booking",
+                  description: "Smart booking system with AI assistant and calendar integration.",
                 },
                 {
                   title: "Dynamic Pricing",
@@ -139,7 +139,7 @@ export default function LandingPage() {
                   title: "Professional",
                   price: "$99",
                   description: "Ideal for growing businesses with more needs.",
-                  features: ["Up to 200 vehicles", "Advanced assessments", "Priority support", "Booking system"],
+                  features: ["Up to 200 vehicles", "Advanced assessments", "Priority support", "AI Booking system"],
                 },
                 {
                   title: "Enterprise",
@@ -192,6 +192,9 @@ export default function LandingPage() {
             </Link>
             <Link href="/contact" className="text-sm text-muted-foreground hover:underline">
               Contact
+            </Link>
+            <Link href="/env-check" className="text-sm text-muted-foreground hover:underline">
+              System Status
             </Link>
           </div>
         </div>
