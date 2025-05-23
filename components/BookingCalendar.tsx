@@ -1,8 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { useQuery } from "convex/react"
-import { api } from "../convex/_generated/api"
+import { useQuery } from "@/convex/_generated/api"
+import { api } from "@/convex/_generated/api"
 import { Calendar, momentLocalizer } from "react-big-calendar"
 import moment from "moment"
 import "react-big-calendar/lib/css/react-big-calendar.css"
