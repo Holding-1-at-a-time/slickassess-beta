@@ -47,9 +47,8 @@ export class GoogleCalendarClient {
       const busyTimes = await this.getBusyTimes(startDate, endDate)
 
       // Generate available time slots based on business hours and busy times
-      const availableSlots = this.generateAvailableSlots(startDate, endDate, duration, busyTimes)
+      return this.generateAvailableSlots(startDate, endDate, duration, busyTimes);
 
-      return availableSlots
     } catch (error) {
       console.error("Error fetching available slots:", error)
       // Return empty array instead of throwing to prevent service disruption
