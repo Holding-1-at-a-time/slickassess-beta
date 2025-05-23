@@ -6,8 +6,6 @@ import moment from "moment"
 import "react-big-calendar/lib/css/react-big-calendar.css"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { useQuery } from "convex/react"
-import { api } from "@/convex/_generated/api"
 
 // Set up the localizer
 const localizer = momentLocalizer(moment)
@@ -20,30 +18,8 @@ export function BookingCalendar({ tenantId }: BookingCalendarProps) {
   const [view, setView] = useState(Views.WEEK)
   const [date, setDate] = useState(new Date())
 
-  // Fetch bookings for the current date range
-  const startDate = moment(date).startOf("month").toISOString()
-  const endDate = moment(date).endOf("month").toISOString()
-
-  // Fetch bookings
-  const queryResult = useQuery(api.queries.listBookingsByDateRange, {
-    startDate,
-    endDate,
-    tenantId,
-  })
-
-  // Initialize bookings to empty array in case of errors or null queryResult
-  const bookings = queryResult || []
-
-  // Convert bookings to calendar events
-  const events =
-    bookings?.map((booking) => ({
-      id: booking._id,
-      title: booking.serviceType,
-      start: new Date(booking.startTime),
-      end: new Date(booking.endTime),
-      status: booking.status,
-      resource: booking,
-    })) || []
+  // For now, use mock data since Convex might not be connected
+  const events: any[] = []
 
   // Custom event styling based on status
   const eventStyleGetter = (event: any) => {

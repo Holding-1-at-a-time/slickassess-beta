@@ -6,7 +6,7 @@ import { ConvexClientProvider } from "@/lib/convexClient"
 export const metadata: Metadata = {
   title: "SlickAssess",
   description: "Vehicle assessment and booking platform",
-  generator: "v0.dev",
+    generator: 'v0.dev'
 }
 
 export default function RootLayout({
