@@ -1,18 +1,40 @@
 import { google, type calendar_v3 } from "googleapis"
 
+// Singleton instance
+let instance: GoogleCalendarClient | null = null
+
 export class GoogleCalendarClient {
   private calendar: calendar_v3.Calendar | null = null
+  private initialized = false
+  private initError: Error | null = null
 
   constructor() {
+    // Prevent multiple instances
+    if (instance) {
+      return instance
+    }
+
+    this.initialize()
+    instance = this
+  }
+
+  private initialize() {
     try {
       // Validate required environment variables
       const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
       const privateKey = process.env.GOOGLE_PRIVATE_KEY
       const calendarId = process.env.GOOGLE_CALENDAR_ID
 
-      if (!email || !privateKey || !calendarId) {
-        console.error("Missing required Google Calendar environment variables")
-        return
+      if (!email) {
+        throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_EMAIL environment variable")
+      }
+
+      if (!privateKey) {
+        throw new Error("Missing GOOGLE_PRIVATE_KEY environment variable")
+      }
+
+      if (!calendarId) {
+        throw new Error("Missing GOOGLE_CALENDAR_ID environment variable")
       }
 
       // Create auth client
@@ -23,15 +45,24 @@ export class GoogleCalendarClient {
       })
 
       this.calendar = google.calendar({ version: "v3", auth })
+      this.initialized = true
     } catch (error) {
       console.error("Error initializing Google Calendar client:", error)
-      // Don't expose the actual error details which might contain sensitive info
+      this.initError = error instanceof Error ? error : new Error(String(error))
+      this.initialized = false
     }
   }
 
   private validateCalendarClient() {
-    if (!this.calendar) {
+    if (!this.initialized) {
+      if (this.initError) {
+        throw this.initError
+      }
       throw new Error("Google Calendar client not initialized properly")
+    }
+
+    if (!this.calendar) {
+      throw new Error("Google Calendar client is null")
     }
   }
 
@@ -47,8 +78,7 @@ export class GoogleCalendarClient {
       const busyTimes = await this.getBusyTimes(startDate, endDate)
 
       // Generate available time slots based on business hours and busy times
-      return this.generateAvailableSlots(startDate, endDate, duration, busyTimes);
-
+      return this.generateAvailableSlots(startDate, endDate, duration, busyTimes)
     } catch (error) {
       console.error("Error fetching available slots:", error)
       // Return empty array instead of throwing to prevent service disruption
@@ -209,8 +239,8 @@ export class GoogleCalendarClient {
 
       const event: calendar_v3.Schema$Event = {}
 
-      if (updates.summary) {
-      if (updates.description) {
+      if (updates.summary) event.summary = updates.summary
+      if (updates.description) event.description = updates.description
       if (updates.startTime) {
         event.start = {
           dateTime: updates.startTime,
@@ -223,7 +253,7 @@ export class GoogleCalendarClient {
           timeZone: "UTC",
         }
       }
-      if (updates.status) {
+      if (updates.status) event.status = updates.status
 
       await this.calendar!.events.patch({
         calendarId,
@@ -261,8 +291,15 @@ export class GoogleCalendarClient {
     expiration?: string,
   ): Promise<{ resourceId: string; expiration: string }> {
     try {
-      const response = await this.calendar.events.watch({
-        calendarId: process.env.GOOGLE_CALENDAR_ID,
+      this.validateCalendarClient()
+
+      const calendarId = process.env.GOOGLE_CALENDAR_ID
+      if (!calendarId) {
+        throw new Error("Missing GOOGLE_CALENDAR_ID environment variable")
+      }
+
+      const response = await this.calendar!.events.watch({
+        calendarId,
         requestBody: {
           id: channelId,
           type: "web_hook",
@@ -277,13 +314,15 @@ export class GoogleCalendarClient {
       }
     } catch (error) {
       console.error("Error setting up calendar watch:", error)
-      throw error
+      throw new Error("Failed to set up calendar watch")
     }
   }
 
   async stopWatch(channelId: string, resourceId: string): Promise<void> {
     try {
-      await this.calendar.channels.stop({
+      this.validateCalendarClient()
+
+      await this.calendar!.channels.stop({
         requestBody: {
           id: channelId,
           resourceId,
@@ -291,7 +330,7 @@ export class GoogleCalendarClient {
       })
     } catch (error) {
       console.error("Error stopping calendar watch:", error)
-      throw error
+      throw new Error("Failed to stop calendar watch")
     }
   }
 
