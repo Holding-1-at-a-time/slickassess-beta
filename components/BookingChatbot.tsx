@@ -1,8 +1,7 @@
 "use client"
 
-import type React from "react"
-
-import { useRef, useEffect, useState } from "react"
+import { useRef, useEffect } from "react"
+import { useChat } from "ai/react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -15,23 +14,23 @@ interface BookingChatbotProps {
   vehicleId?: string
 }
 
-interface Message {
-  id: string
-  role: "user" | "assistant"
-  content: string
-}
-
 export function BookingChatbot({ tenantId, vehicleId }: BookingChatbotProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "welcome-message",
-      role: "assistant",
-      content:
-        "Hi there! I'm your booking assistant. I can help you schedule a service appointment. What type of service are you looking for today?",
+  const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({
+    api: "/api/chat",
+    body: {
+      tenantId,
+      vehicleId,
     },
-  ])
-  const [input, setInput] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
+    initialMessages: [
+      {
+        id: "welcome-message",
+        role: "assistant",
+        content:
+          "Hi there! I'm your booking assistant. I can help you schedule a service appointment. What type of service are you looking for today?",
+      },
+    ],
+  })
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -39,33 +38,6 @@ export function BookingChatbot({ tenantId, vehicleId }: BookingChatbotProps) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" })
     }
   }, [messages])
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!input.trim()) return
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: "user",
-      content: input,
-    }
-
-    setMessages((prev) => [...prev, userMessage])
-    setInput("")
-    setIsLoading(true)
-
-    // Simulate AI response
-    setTimeout(() => {
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content:
-          "I understand you'd like to schedule a service. Currently, the booking system is being set up. Please check back soon or contact us directly.",
-      }
-      setMessages((prev) => [...prev, assistantMessage])
-      setIsLoading(false)
-    }, 1000)
-  }
 
   return (
     <Card className="w-full max-w-md mx-auto">
@@ -111,7 +83,7 @@ export function BookingChatbot({ tenantId, vehicleId }: BookingChatbotProps) {
         <form onSubmit={handleSubmit} className="flex w-full gap-2">
           <Input
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={handleInputChange}
             placeholder="Type your message..."
             disabled={isLoading}
             className="flex-1"

@@ -1,4 +1,4 @@
-import { StreamingTextResponse } from "ai"
+import { streamText } from "ai"
 import { Together } from "together-ai"
 import { fetchAvailableSlots } from "@/convex/functions/fetchAvailableSlots"
 import { createBooking } from "@/convex/functions/createBooking"
@@ -90,52 +90,47 @@ export async function POST(req: Request) {
   // Extract the messages from the request
   const { messages, tenantId, vehicleId } = await req.json()
 
-  // Create a response stream
-  const response = await together.chat.completions.create({
-    model: "Qwen/Qwen2-1.5B-Instruct",
+  // Create a stream using the new AI SDK 4.0 syntax
+  const result = await streamText({
+    model: together.chat("Qwen/Qwen2-1.5B-Instruct"),
     messages,
     tools,
-    tool_choice: "auto",
-    stream: true,
+    toolChoice: "auto",
+    onToolCall: async (toolCall) => {
+      const { name, arguments: args } = toolCall.function
+
+      if (name === "fetchAvailableSlots") {
+        const parsedArgs = JSON.parse(args)
+        const slots = await fetchAvailableSlots({
+          startDate: parsedArgs.startDate,
+          endDate: parsedArgs.endDate,
+          duration: parsedArgs.duration,
+        })
+
+        return { slots }
+      }
+
+      if (name === "createBooking") {
+        const parsedArgs = JSON.parse(args)
+        const result = await createBooking({
+          tenantId: tenantId || parsedArgs.tenantId,
+          vehicleId: vehicleId || parsedArgs.vehicleId,
+          serviceType: parsedArgs.serviceType,
+          startTime: parsedArgs.startTime,
+          endTime: parsedArgs.endTime,
+          notes: parsedArgs.notes,
+          customerEmail: parsedArgs.customerEmail,
+          customerName: parsedArgs.customerName,
+          customerPhone: parsedArgs.customerPhone,
+        })
+
+        return { bookingId: result.bookingId, googleEventId: result.googleEventId }
+      }
+
+      return { error: `Unknown tool: ${name}` }
+    },
   })
 
-  // Process tool calls
-  const processToolCall = async (toolCall: any) => {
-    const { name, arguments: args } = toolCall.function
-
-    if (name === "fetchAvailableSlots") {
-      const parsedArgs = JSON.parse(args)
-      const slots = await fetchAvailableSlots({
-        startDate: parsedArgs.startDate,
-        endDate: parsedArgs.endDate,
-        duration: parsedArgs.duration,
-      })
-
-      return { slots }
-    }
-
-    if (name === "createBooking") {
-      const parsedArgs = JSON.parse(args)
-      const result = await createBooking({
-        tenantId: tenantId || parsedArgs.tenantId,
-        vehicleId: vehicleId || parsedArgs.vehicleId,
-        serviceType: parsedArgs.serviceType,
-        startTime: parsedArgs.startTime,
-        endTime: parsedArgs.endTime,
-        notes: parsedArgs.notes,
-        customerEmail: parsedArgs.customerEmail,
-        customerName: parsedArgs.customerName,
-        customerPhone: parsedArgs.customerPhone,
-      })
-
-      return { bookingId: result.bookingId, googleEventId: result.googleEventId }
-    }
-
-    return { error: `Unknown tool: ${name}` }
-  }
-
-  // Convert the response to a streaming response
-  const stream = Together.toReadableStream(response)
-
-  return new StreamingTextResponse(stream)
+  // Convert the result to a stream response
+  return result.toDataStreamResponse()
 }
