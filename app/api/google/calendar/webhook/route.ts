@@ -24,8 +24,15 @@ export async function POST(request: Request) {
       const eventId = request.headers.get("X-Goog-Resource-URI")?.split("/").pop()
 
       if (eventId) {
-        // Update the booking based on the calendar event
-        await updateBookingFromCalendarEvent({ eventId })
+        // Import the Convex client
+        import { api } from "@/convex/_generated/api"
+        import { ConvexHttpClient } from "convex/browser"
+
+        // Initialize the client
+        const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!)
+
+        // Call the Convex action
+        await convex.action(api.actions.updateBookingFromCalendarEvent, { eventId })
       }
     }
 
