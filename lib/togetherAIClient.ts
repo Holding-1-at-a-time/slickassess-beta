@@ -11,16 +11,15 @@ export class TogetherAIClient {
 
   async createChatCompletion(messages: any[], tools?: any[]) {
     try {
-      const response = await this.together.chat.completions.create({
-        model: "Qwen/Qwen2-1.5B-Instruct",
-        messages,
-        tools,
-        tool_choice: tools ? "auto" : "none",
-        temperature: 0.7,
-        max_tokens: 1000,
-      })
+      return await this.together.chat.completions.create({
+              model: "Qwen/Qwen2-1.5B-Instruct",
+              messages,
+              tools,
+              tool_choice: tools ? "auto" : "none",
+              temperature: 0.7,
+              max_tokens: 1000,
+            });
 
-      return response
     } catch (error) {
       console.error("Error creating chat completion:", error)
       throw error
