@@ -210,7 +210,7 @@ export class GoogleCalendarClient {
       const event: calendar_v3.Schema$Event = {}
 
       if (updates.summary) {
-      if (updates.description) event.description = updates.description
+      if (updates.description) {
       if (updates.startTime) {
         event.start = {
           dateTime: updates.startTime,
