@@ -1,48 +1,33 @@
 import { v } from "convex/values"
 import { action } from "./_generated/server"
-import { createGoogleCalendarClient, type AvailableTimeSlot } from "../../lib/googleCalendarClient"
+import { GoogleCalendarClient } from "../../lib/googleCalendarClient"
 
 export default action({
   args: {
     tenantId: v.string(),
-    startDate: v.string(),
-    endDate: v.string(),
-    durationMinutes: v.number(),
-    serviceType: v.optional(v.string()),
+    startDate: v.string(), // ISO string
+    endDate: v.string(), // ISO string
+    duration: v.number(), // in minutes
   },
-  handler: async (ctx, args): Promise<AvailableTimeSlot[]> => {
-    // Validate the input dates
-    const startDateObj = new Date(args.startDate)
-    const endDateObj = new Date(args.endDate)
+  handler: async (ctx, args) => {
+    // In a real implementation, you would fetch the tenant's calendar ID from the database
+    // For now, we'll use the environment variable
+    const calendarId = process.env.GOOGLE_CALENDAR_ID || ""
 
-    if (isNaN(startDateObj.getTime()) || isNaN(endDateObj.getTime())) {
-      throw new Error("Invalid date format")
+    if (!calendarId) {
+      throw new Error("Calendar ID not configured for this tenant")
     }
 
-    if (startDateObj >= endDateObj) {
-      throw new Error("Start date must be before end date")
-    }
+    const calendarClient = new GoogleCalendarClient(calendarId)
 
-    if (args.durationMinutes <= 0) {
-      throw new Error("Duration must be positive")
-    }
+    const startDate = new Date(args.startDate)
+    const endDate = new Date(args.endDate)
 
-    try {
-      // Get the tenant's calendar ID (in a real app, you'd fetch this from your database)
-      // For now, we'll use the default calendar ID from environment variables
-      const calendarClient = createGoogleCalendarClient()
+    const availableSlots = await calendarClient.getAvailableSlots(startDate, endDate, args.duration)
 
-      // Fetch available slots
-      const availableSlots = await calendarClient.fetchAvailableSlots(
-        args.startDate,
-        args.endDate,
-        args.durationMinutes,
-      )
-
-      return availableSlots
-    } catch (error) {
-      console.error("Error fetching available slots:", error)
-      throw new Error("Failed to fetch available time slots")
-    }
+    return availableSlots.map((slot) => ({
+      start: slot.start.toISOString(),
+      end: slot.end.toISOString(),
+    }))
   },
 })

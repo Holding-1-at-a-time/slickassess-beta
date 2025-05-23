@@ -1,88 +1,103 @@
 import { v } from "convex/values"
-import { mutation } from "./_generated/server"
-import { createGoogleCalendarClient, type BookingRequest } from "../../lib/googleCalendarClient"
+import { mutation, action } from "./_generated/server"
+import { GoogleCalendarClient } from "../../lib/googleCalendarClient"
 
-export default mutation({
+// First, create a mutation to store the booking in Convex
+export const createBookingRecord = mutation({
   args: {
     tenantId: v.string(),
     vehicleId: v.string(),
-    customerName: v.string(),
-    customerEmail: v.string(),
-    customerPhone: v.optional(v.string()),
+    customerId: v.string(),
     serviceType: v.string(),
-    startTime: v.string(),
-    endTime: v.string(),
+    startTime: v.string(), // ISO string
+    endTime: v.string(), // ISO string
+    duration: v.number(), // in minutes
     notes: v.optional(v.string()),
-    staffId: v.optional(v.string()),
-    staffName: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    // Calculate duration in minutes
-    const startTime = new Date(args.startTime)
-    const endTime = new Date(args.endTime)
-    const durationMinutes = Math.round((endTime.getTime() - startTime.getTime()) / (1000 * 60))
+    const startTime = new Date(args.startTime).getTime()
+    const endTime = new Date(args.endTime).getTime()
 
-    // Create the booking in Convex
     const bookingId = await ctx.db.insert("bookings", {
       tenantId: args.tenantId,
       vehicleId: args.vehicleId,
-      customerName: args.customerName,
-      customerEmail: args.customerEmail,
-      customerPhone: args.customerPhone,
+      customerId: args.customerId,
       serviceType: args.serviceType,
-      startTime: args.startTime,
-      endTime: args.endTime,
-      duration: durationMinutes,
+      startTime,
+      endTime,
+      duration: args.duration,
       status: "pending",
       notes: args.notes,
-      staffId: args.staffId,
-      staffName: args.staffName,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      reminderSent: false,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
     })
 
-    try {
-      // Create the event in Google Calendar
-      const calendarClient = createGoogleCalendarClient()
+    return bookingId
+  },
+})
 
-      const bookingRequest: BookingRequest = {
-        title: `${args.serviceType} - ${args.customerName}`,
-        description: `Service: ${args.serviceType}\nVehicle ID: ${args.vehicleId}\nNotes: ${args.notes || "None"}\nBooking ID: ${bookingId}`,
-        startTime: args.startTime,
-        endTime: args.endTime,
-        attendeeEmail: args.customerEmail,
-        serviceType: args.serviceType,
-        vehicleId: args.vehicleId,
-        tenantId: args.tenantId,
-        staffId: args.staffId,
-      }
+// Then, create an action to create the event in Google Calendar
+export const createCalendarEvent = action({
+  args: {
+    bookingId: v.id("bookings"),
+    tenantId: v.string(),
+    vehicleId: v.string(),
+    serviceType: v.string(),
+    startTime: v.string(), // ISO string
+    endTime: v.string(), // ISO string
+    customerEmail: v.optional(v.string()),
+    notes: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    // In a real implementation, you would fetch the tenant's calendar ID from the database
+    const calendarId = process.env.GOOGLE_CALENDAR_ID || ""
 
-      const calendarEvent = await calendarClient.createEvent(bookingRequest)
-
-      // Update the booking with Google Calendar event ID
-      await ctx.db.patch(bookingId, {
-        googleEventId: calendarEvent.eventId,
-        googleEventLink: calendarEvent.htmlLink,
-        status: "confirmed",
-        updatedAt: new Date().toISOString(),
-      })
-
-      return {
-        bookingId,
-        googleEventId: calendarEvent.eventId,
-        googleEventLink: calendarEvent.htmlLink,
-        status: "confirmed",
-      }
-    } catch (error) {
-      console.error("Error creating Google Calendar event:", error)
-
-      // The booking is still created in Convex, but without Google Calendar integration
-      return {
-        bookingId,
-        status: "pending",
-        error: "Failed to create Google Calendar event",
-      }
+    if (!calendarId) {
+      throw new Error("Calendar ID not configured for this tenant")
     }
+
+    const calendarClient = new GoogleCalendarClient(calendarId)
+
+    // Get vehicle details for the event summary
+    const vehicleDetails = await ctx.runQuery("getVehicleById", {
+      tenantId: args.tenantId,
+      vehicleId: args.vehicleId,
+    })
+
+    const summary = `${args.serviceType} - ${vehicleDetails?.name || "Vehicle"}`
+    const description = args.notes || `Booking for ${args.serviceType}`
+
+    const eventId = await calendarClient.createEvent({
+      summary,
+      description,
+      startTime: new Date(args.startTime),
+      endTime: new Date(args.endTime),
+      attendeeEmail: args.customerEmail,
+    })
+
+    // Update the booking record with the Google Calendar event ID
+    await ctx.runMutation("updateBookingWithEventId", {
+      bookingId: args.bookingId,
+      googleEventId: eventId,
+      status: "confirmed",
+    })
+
+    return { eventId }
+  },
+})
+
+// Helper mutation to update the booking with the Google Calendar event ID
+export const updateBookingWithEventId = mutation({
+  args: {
+    bookingId: v.id("bookings"),
+    googleEventId: v.string(),
+    status: v.union(v.literal("confirmed"), v.literal("pending"), v.literal("canceled"), v.literal("completed")),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.bookingId, {
+      googleEventId: args.googleEventId,
+      status: args.status,
+      updatedAt: Date.now(),
+    })
   },
 })

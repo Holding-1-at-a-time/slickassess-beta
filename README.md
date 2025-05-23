@@ -1,116 +1,30 @@
-# SlickAssess Booking System
+# Image Analysis
 
-This implementation provides a complete booking system with Google Calendar integration, AI-powered chatbot, and automated reminders.
+*Automatically synced with your [v0.dev](https://v0.dev) deployments*
 
-## Features
+[![Deployed on Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-black?style=for-the-badge&logo=vercel)](https://vercel.com/holding-one-at-a-times-projects/v0-image-analysis-78)
+[![Built with v0](https://img.shields.io/badge/Built%20with-v0.dev-black?style=for-the-badge)](https://v0.dev/chat/projects/y6aiZtaCLVl)
 
-- Google Calendar integration for managing bookings
-- AI-powered chatbot for booking services
-- Real-time calendar view of all bookings
-- Automated email reminders for upcoming appointments
-- Webhook support for external calendar updates
+## Overview
 
-## Setup Instructions
+This repository will stay in sync with your deployed chats on [v0.dev](https://v0.dev).
+Any changes you make to your deployed app will be automatically pushed to this repository from [v0.dev](https://v0.dev).
 
-### 1. Google Cloud Setup
+## Deployment
 
-1. Create a Google Cloud project
-2. Enable the Google Calendar API and Gmail API
-3. Create a Service Account with the following permissions:
-   - `https://www.googleapis.com/auth/calendar`
-   - `https://www.googleapis.com/auth/gmail.send`
-4. Generate and download a JSON key for the service account
-5. Create a Google Calendar for your bookings or use an existing one
+Your project is live at:
 
-### 2. Environment Variables
+**[https://vercel.com/holding-one-at-a-times-projects/v0-image-analysis-78](https://vercel.com/holding-one-at-a-times-projects/v0-image-analysis-78)**
 
-Copy the `.env.example` file to `.env.local` and fill in the values:
+## Build your app
 
-\`\`\`
-GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@project-id.iam.gserviceaccount.com
-GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYour private key here\n-----END PRIVATE KEY-----\n"
-GOOGLE_CALENDAR_ID=your-calendar-id@group.calendar.google.com
-NEXT_PUBLIC_CONVEX_URL=your-convex-deployment-url
-NEXT_PUBLIC_BASE_URL=http://localhost:3000
-\`\`\`
+Continue building your app on:
 
-### 3. Convex Setup
+**[https://v0.dev/chat/projects/y6aiZtaCLVl](https://v0.dev/chat/projects/y6aiZtaCLVl)**
 
-1. Initialize your Convex project if not already done:
-   \`\`\`
-   npx convex init
-   \`\`\`
+## How It Works
 
-2. Deploy your Convex functions:
-   \`\`\`
-   npx convex push
-   \`\`\`
-
-### 4. Set Up Calendar Webhook
-
-1. Deploy your application to a public URL (or use a tool like ngrok for local development)
-2. Set up the webhook by visiting:
-   \`\`\`
-   https://your-domain.com/api/google/calendar/setup-webhook
-   \`\`\`
-   This will register your webhook with Google Calendar
-
-## Usage
-
-1. Navigate to the booking page: `/{tenantId}/dashboard/bookings/new`
-2. Use the AI chatbot to book a service by following the prompts
-3. Alternatively, use the Calendar view to see available slots and existing bookings
-4. View all bookings on the bookings page: `/{tenantId}/dashboard/bookings`
-
-## Components
-
-### BookingChatbot
-
-The `BookingChatbot` component provides an AI-powered interface for booking services. It guides users through the booking process by asking for:
-
-- Service type
-- Preferred date
-- Time slot selection
-- Booking confirmation
-
-### BookingCalendar
-
-The `BookingCalendar` component displays a calendar view of all bookings with color-coding based on status:
-
-- Green: Confirmed
-- Yellow: Pending
-- Red: Canceled
-- Purple: Completed
-- Gray: No-show
-
-## Automated Reminders
-
-The system automatically sends email reminders for bookings scheduled for the next day. This is handled by a Convex scheduled function that runs daily at 8 AM UTC.
-
-## Webhook Integration
-
-The webhook endpoint at `/api/google/calendar/webhook` receives notifications from Google Calendar when events are created, updated, or deleted. This ensures that your booking system stays in sync with external calendar changes.
-
-## Extending the System
-
-### Adding SMS Reminders
-
-To add SMS reminders, you can integrate with a service like Twilio:
-
-1. Install the Twilio SDK: `npm install twilio`
-2. Create a Twilio client in `lib/twilioClient.ts`
-3. Update the `sendBookingReminders` function to send SMS notifications
-
-### Supporting Multiple Staff Calendars
-
-To support multiple staff members with their own calendars:
-
-1. Store staff calendar IDs in your database
-2. Modify the `fetchAvailableSlots` function to check availability across all calendars
-3. Update the booking creation to assign to the appropriate staff member
-
-## Troubleshooting
-
-- **Webhook not receiving events**: Ensure your webhook URL is publicly accessible and the service account has the correct permissions
-- **Calendar events not syncing**: Check that the calendar ID is correct and the service account has access to it
-- **Reminders not sending**: Verify that the Gmail API is enabled and the service account has the necessary permissions
+1. Create and modify your project using [v0.dev](https://v0.dev)
+2. Deploy your chats from the v0 interface
+3. Changes are automatically pushed to this repository
+4. Vercel deploys the latest version from this repository
