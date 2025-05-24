@@ -1,6 +1,5 @@
 import { query } from "../../_generated/server"
 import { v } from "convex/values"
-import { createDefaultAssessmentTemplate } from "../../../utils/defaultAssessmentTemplate"
 
 export default query({
   args: {
@@ -23,17 +22,10 @@ export default query({
       throw new Error("Unauthorized: User does not have access to this tenant")
     }
 
-    // Get the tenant
-    const tenant = await ctx.db
-      .query("tenants")
-      .filter((q) => q.eq(q.field("_id"), args.tenantId))
-      .first()
-
-    if (!tenant) {
-      throw new Error("Tenant not found")
-    }
-
-    // Return the template or a default if not found
-    return tenant.assessmentFormTemplate || createDefaultAssessmentTemplate()
+    // Get all assessments for this tenant
+    return await ctx.db
+      .query("assessments")
+      .filter((q) => q.eq(q.field("tenantId"), args.tenantId))
+      .collect()
   },
 })

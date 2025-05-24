@@ -57,6 +57,7 @@
     "openai": "latest",
     "qrcode": "latest",
     "react": "^19",
+    "react-beautiful-dnd": "latest",
     "react-big-calendar": "latest",
     "react-day-picker": "8.10.1",
     "react-dom": "^19",

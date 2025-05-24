@@ -42,28 +42,25 @@ export default mutation({
       throw new Error("Unauthorized: User does not have access to this tenant")
     }
 
-    // Check if a template already exists for this tenant
-    const existingTemplate = await ctx.db
-      .query("assessmentTemplates")
-      .withIndex("by_tenant", (q) => q.eq("tenantId", args.tenantId))
+    // Get the tenant
+    const tenant = await ctx.db
+      .query("tenants")
+      .filter((q) => q.eq(q.field("_id"), args.tenantId))
       .first()
 
+    if (!tenant) {
+      throw new Error("Tenant not found")
+    }
+
+    // Use provided template or create default
     const template = args.template || createDefaultAssessmentTemplate()
 
-    if (existingTemplate) {
-      // Update existing template
-      return await ctx.db.patch(existingTemplate._id, {
-        template,
-        updatedAt: Date.now(),
-      })
-    } else {
-      // Create new template
-      return await ctx.db.insert("assessmentTemplates", {
-        tenantId: args.tenantId,
-        template,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      })
-    }
+    // Update the tenant with the new template
+    await ctx.db.patch(tenant._id, {
+      assessmentFormTemplate: template,
+      updatedAt: Date.now(),
+    })
+
+    return { success: true, templateId: tenant._id }
   },
 })
