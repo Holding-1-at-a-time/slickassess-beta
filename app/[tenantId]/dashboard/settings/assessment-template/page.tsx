@@ -68,7 +68,7 @@ export default function AssessmentTemplatePage() {
     if (!template) return
 
     setTemplate((prev) => {
-      if (!prev) return prev
+      if (!prev) {
 
       const newTemplate = { ...prev }
       const sectionIndex = newTemplate.sections.findIndex((s) => s.id === sectionId)
