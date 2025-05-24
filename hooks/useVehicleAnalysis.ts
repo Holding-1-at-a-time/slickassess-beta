@@ -1,92 +1,50 @@
 "use client"
 
-import { useState } from "react"
-import { useObjectStream } from "ai/react"
-import type { AIStreamObject, AIAnalysisResult } from "@/lib/types/ai-responses"
+import { useState, useCallback } from "react"
+import { analyzeVehicle } from "@/lib/api"
+import { generateFallbackAnalysis } from "@/lib/aiAnalysisRecovery"
 
-interface UseVehicleAnalysisProps {
-  tenantId: string
-  onComplete?: (result: AIAnalysisResult) => void
-  onError?: (error: Error) => void
+interface AnalysisResult {
+  summary: string
+  detailedAnalysis: string[]
 }
 
-export function useVehicleAnalysis({ tenantId, onComplete, onError }: UseVehicleAnalysisProps) {
+const useVehicleAnalysis = (imageUrls: string[]) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [result, setResult] = useState<AnalysisResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
-  const { objects, error, isLoading, append } = useObjectStream<AIStreamObject>({
-    api: "/api/ai/analyze-vehicle",
-    onFinish: (objects) => {
-      setIsAnalyzing(false)
-      const completeObject = objects.find((obj) => obj.type === "complete") as
-        | { type: "complete"; result: AIAnalysisResult }
-        | undefined
-      if (completeObject) {
-        onComplete?.(completeObject.result)
-      }
-    },
-    onError: (err) => {
-      setIsAnalyzing(false)
-      onError?.(err)
-    },
-  })
-
-  const analyzeVehicle = async (
-    imageUrls: string[],
-    vehicleInfo?: {
-      make?: string
-      model?: string
-      year?: number
-      type?: string
-    },
-  ) => {
+  const startAnalysis = useCallback(async () => {
     setIsAnalyzing(true)
-    await append({
-      imageUrls,
-      vehicleInfo,
-      tenantId,
-    })
-  }
+    setError(null)
 
-  // Extract different types of objects from the stream
-  const progressUpdates = objects.filter((obj) => obj.type === "progress") as Array<{
-    type: "progress"
-    message: string
-    percentComplete: number
-  }>
-  const thinkingSteps = objects.filter((obj) => obj.type === "thinking") as Array<{ type: "thinking"; message: string }>
-  const analysisSteps = objects.filter((obj) => obj.type === "analysis") as Array<{ type: "analysis"; step: any }>
-  const completeResult = objects.find((obj) => obj.type === "complete") as
-    | { type: "complete"; result: AIAnalysisResult }
-    | undefined
-  const streamError = objects.find((obj) => obj.type === "error") as
-    | { type: "error"; message: string; code?: string }
-    | undefined
+    try {
+      const analysisResult = await analyzeVehicle(imageUrls)
+      setResult(analysisResult)
+    } catch (error) {
+      console.error("Failed to analyze vehicle:", error)
+      setIsAnalyzing(false)
 
-  // Calculate current progress
-  const currentProgress = progressUpdates.length > 0 ? progressUpdates[progressUpdates.length - 1].percentComplete : 0
+      // Provide a fallback analysis if AI fails
+      const fallbackResult = generateFallbackAnalysis(imageUrls.length)
+      setResult(fallbackResult)
 
-  // Get the latest message to display
-  const latestMessage =
-    progressUpdates.length > 0
-      ? progressUpdates[progressUpdates.length - 1].message
-      : thinkingSteps.length > 0
-        ? thinkingSteps[thinkingSteps.length - 1].message
-        : analysisSteps.length > 0
-          ? analysisSteps[analysisSteps.length - 1].step.message
-          : streamError
-            ? streamError.message
-            : "Ready to analyze"
+      // Update error message based on error type
+      let errorMessage = "Failed to analyze vehicle"
+      if (error instanceof Error) {
+        if (error.message.includes("Rate limit")) {
+          errorMessage = "Too many requests. Please try again in a few minutes."
+        } else if (error.message.includes("Authentication")) {
+          errorMessage = "Service configuration error. Please contact support."
+        }
+      }
+      setError(errorMessage)
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }, [imageUrls])
 
-  return {
-    analyzeVehicle,
-    isAnalyzing: isLoading || isAnalyzing,
-    progress: currentProgress,
-    message: latestMessage,
-    progressUpdates,
-    thinkingSteps,
-    analysisSteps,
-    result: completeResult?.result,
-    error: error || streamError?.message,
-    objects,
-  }
+  return { isAnalyzing, result, error, startAnalysis }
 }
+
+export default useVehicleAnalysis
