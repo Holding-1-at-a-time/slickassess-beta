@@ -114,7 +114,7 @@ export default function AssessmentTemplatePage() {
     if (!template) return
 
     setTemplate((prev) => {
-      if (!prev) return prev
+      if (!prev) {
 
       const sectionExists = prev.sections.some((s) => s.id === sectionId)
       const filteredSections = prev.sections.filter((s) => s.id !== sectionId)
