@@ -184,7 +184,8 @@ export default function AssessmentTemplatePage() {
   }
 
   // Handle drag and drop
-  const handleDragEnd = (result: any) => {
+  import type { DropResult } from "react-beautiful-dnd"
+  const handleDragEnd = (result: DropResult) => {
     if (!template) return
 
     const { source, destination, type } = result
