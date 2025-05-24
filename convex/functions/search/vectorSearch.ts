@@ -2,6 +2,7 @@ import { action } from "../../_generated/server"
 import { v } from "convex/values"
 import { openai } from "@ai-sdk/openai"
 import { embed } from "ai"
+import { ConvexError } from "convex/values"
 
 export default action({
   args: {
@@ -20,19 +21,45 @@ export default action({
     ),
     limit: v.optional(v.number()),
     threshold: v.optional(v.number()),
+    cursor: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     try {
+      // Validate input
+      if (!args.query.trim()) {
+        throw new ConvexError({
+          code: "INVALID_ARGUMENT",
+          message: "Search query cannot be empty",
+        })
+      }
+
       // Generate embedding for the query
       const { embedding } = await embed({
         model: openai.embedding("text-embedding-3-small"),
         value: args.query,
       })
 
-      // Perform vector search
+      // Set defaults
+      const limit = Math.min(args.limit ?? 10, 50) // Max 50 results per page
+      const threshold = args.threshold ?? 0.7
+
+      // Parse cursor if provided
+      let cursorObj = undefined
+      if (args.cursor) {
+        try {
+          cursorObj = JSON.parse(args.cursor)
+        } catch (e) {
+          throw new ConvexError({
+            code: "INVALID_CURSOR",
+            message: "Invalid cursor format",
+          })
+        }
+      }
+
+      // Perform vector search with pagination
       const results = await ctx.vectorSearch("embeddings", "by_embedding", {
         vector: Array.from(embedding),
-        limit: args.limit ?? 10,
+        limit: limit + 1, // Get one extra to check if there are more results
         filter: (q) => {
           let filter = q.eq("tenantId", args.tenantId)
           if (args.contentTypes && args.contentTypes.length > 0) {
@@ -40,11 +67,18 @@ export default action({
           }
           return filter
         },
+        cursor: cursorObj,
       })
 
-      // Filter by threshold if provided
-      const threshold = args.threshold ?? 0.7
-      const filteredResults = results.filter((r) => r._score >= threshold)
+      // Check if there are more results
+      const hasMore = results.length > limit
+      const paginatedResults = hasMore ? results.slice(0, limit) : results
+
+      // Filter by threshold
+      const filteredResults = paginatedResults.filter((r) => r._score >= threshold)
+
+      // Generate next cursor
+      const nextCursor = hasMore ? JSON.stringify(results[limit - 1]._cursor) : null
 
       // Log search for analytics
       await ctx.runMutation("search/logSearch", {
@@ -52,6 +86,7 @@ export default action({
         query: args.query,
         searchType: "vector",
         resultsCount: filteredResults.length,
+        filters: args.contentTypes ? { contentTypes: args.contentTypes } : undefined,
       })
 
       return {
@@ -64,10 +99,19 @@ export default action({
           metadata: r.metadata,
         })),
         totalResults: filteredResults.length,
+        hasMore,
+        nextCursor,
       }
     } catch (error) {
       console.error("Vector search error:", error)
-      throw new Error("Failed to perform vector search")
+      if (error instanceof ConvexError) {
+        throw error
+      }
+      throw new ConvexError({
+        code: "SEARCH_FAILED",
+        message: "Failed to perform vector search",
+        cause: error.message,
+      })
     }
   },
 })
