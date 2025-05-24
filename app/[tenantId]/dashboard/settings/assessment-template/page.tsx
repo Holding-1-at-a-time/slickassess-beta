@@ -90,7 +90,7 @@ export default function AssessmentTemplatePage() {
 
   // Add a new section
   const addSection = () => {
-    if (!template) return
+    if (!template) {
 
     const newSection: FormSection = {
       id: nanoid(),
