@@ -9,7 +9,6 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  transpilePackages: ['framer-motion'],
 }
 
 export default nextConfig
