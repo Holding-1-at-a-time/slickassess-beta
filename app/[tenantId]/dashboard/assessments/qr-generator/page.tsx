@@ -1,31 +1,29 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState } from "react"
 import { useParams } from "next/navigation"
 import { useMutation, useQuery } from "convex/react"
 import { api } from "@/convex/_generated/api"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/use-toast"
-import { generateAssessmentQRCodeSVG } from "@/utils/qrCodeGenerator"
+import { QrCode, Download, Printer, Copy } from "lucide-react"
+import QRCode from "qrcode.react"
 
 export default function QRGeneratorPage() {
   const params = useParams<{ tenantId: string }>()
   const { tenantId } = params
 
   // State
-  const [selectedVehicle, setSelectedVehicle] = useState<string>("")
+  const [vehicleId, setVehicleId] = useState<string>("")
   const [expiryHours, setExpiryHours] = useState<number>(24)
-  const [qrCodeSVG, setQrCodeSVG] = useState<string | null>(null)
-  const [qrCodeToken, setQrCodeToken] = useState<string | null>(null)
+  const [tokenId, setTokenId] = useState<string>("")
+  const [qrUrl, setQrUrl] = useState<string>("")
   const [generating, setGenerating] = useState<boolean>(false)
-
-  // Refs
-  const qrCodeRef = useRef<HTMLDivElement>(null)
 
   // Queries
   const vehicles = useQuery(api.vehicles.listVehicles, { tenantId })
@@ -33,32 +31,26 @@ export default function QRGeneratorPage() {
   // Mutations
   const generateToken = useMutation(api.assessmentTokens.generateToken)
 
-  // Generate QR code
-  const handleGenerateQR = async () => {
+  // Handle token generation
+  const handleGenerateToken = async () => {
     setGenerating(true)
 
     try {
-      // Generate token
-      const tokenData = await generateToken({
+      const result = await generateToken({
         tenantId,
-        vehicleId: selectedVehicle || undefined,
-        expiryMinutes: expiryHours * 60,
+        vehicleId: vehicleId || undefined,
+        expiryHours,
       })
 
-      // Generate QR code
-      const baseUrl = window.location.origin
-      const svg = await generateAssessmentQRCodeSVG(baseUrl, tokenData.token)
-
-      // Update state
-      setQrCodeSVG(svg)
-      setQrCodeToken(tokenData.token)
+      setTokenId(result.tokenId)
+      setQrUrl(`${window.location.origin}/public/assess/${result.token}`)
 
       toast({
         title: "QR Code Generated",
-        description: "The QR code has been generated successfully.",
+        description: "The assessment QR code has been generated successfully.",
       })
     } catch (error) {
-      console.error("Error generating QR code:", error)
+      console.error("Error generating token:", error)
       toast({
         title: "Generation Failed",
         description: "Failed to generate QR code. Please try again.",
@@ -69,123 +61,89 @@ export default function QRGeneratorPage() {
     }
   }
 
-  // Download QR code as SVG
-  const handleDownloadSVG = () => {
-    if (!qrCodeSVG) return
+  // Handle QR code download
+  const handleDownloadQR = () => {
+    const canvas = document.getElementById("qr-code") as HTMLCanvasElement
+    if (!canvas) return
 
-    const blob = new Blob([qrCodeSVG], { type: "image/svg+xml" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `assessment-qr-${Date.now()}.svg`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    const url = canvas.toDataURL("image/png")
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `assessment-qr-${new Date().toISOString().slice(0, 10)}.png`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
   }
 
-  // Download QR code as PNG
-  const handleDownloadPNG = () => {
-    if (!qrCodeRef.current) return
-
-    const svg = qrCodeRef.current.querySelector("svg")
-    if (!svg) return
-
-    const canvas = document.createElement("canvas")
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return
-
-    const svgData = new XMLSerializer().serializeToString(svg)
-    const img = new Image()
-
-    img.onload = () => {
-      canvas.width = img.width
-      canvas.height = img.height
-      ctx.drawImage(img, 0, 0)
-
-      const pngUrl = canvas.toDataURL("image/png")
-      const a = document.createElement("a")
-      a.href = pngUrl
-      a.download = `assessment-qr-${Date.now()}.png`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-    }
-
-    img.src = "data:image/svg+xml;base64," + btoa(svgData)
-  }
-
-  // Print QR code
-  const handlePrint = () => {
-    if (!qrCodeRef.current) return
-
+  // Handle QR code printing
+  const handlePrintQR = () => {
     const printWindow = window.open("", "_blank")
     if (!printWindow) return
 
-    const token = qrCodeToken || ""
-    const url = `${window.location.origin}/public/assess/${token}`
+    const canvas = document.getElementById("qr-code") as HTMLCanvasElement
+    if (!canvas) return
+
+    const url = canvas.toDataURL("image/png")
 
     printWindow.document.write(`
-      <!DOCTYPE html>
       <html>
         <head>
           <title>Assessment QR Code</title>
           <style>
             body {
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              height: 100vh;
               font-family: Arial, sans-serif;
-              text-align: center;
-              padding: 20px;
             }
             .qr-container {
-              margin: 20px auto;
-              max-width: 300px;
+              text-align: center;
+              padding: 20px;
+              border: 1px solid #ccc;
+              border-radius: 8px;
             }
-            .qr-code {
-              width: 100%;
+            img {
+              max-width: 300px;
               height: auto;
             }
-            .url {
+            h2 {
+              margin-bottom: 10px;
+            }
+            p {
               margin-top: 20px;
-              word-break: break-all;
-              font-size: 14px;
-            }
-            .instructions {
-              margin-top: 30px;
-              text-align: left;
-              max-width: 500px;
-              margin-left: auto;
-              margin-right: auto;
-            }
-            @media print {
-              .no-print {
-                display: none;
-              }
+              color: #666;
             }
           </style>
         </head>
         <body>
-          <h1>Vehicle Self-Assessment</h1>
           <div class="qr-container">
-            ${qrCodeSVG}
+            <h2>Vehicle Assessment</h2>
+            <img src="${url}" alt="Assessment QR Code" />
+            <p>Scan this QR code to complete your vehicle assessment</p>
+            <p>Expires in ${expiryHours} hours</p>
           </div>
-          <div class="url">
-            <p>Or visit: ${url}</p>
-          </div>
-          <div class="instructions">
-            <h2>Instructions:</h2>
-            <ol>
-              <li>Scan the QR code with your smartphone camera</li>
-              <li>Complete the vehicle self-assessment form</li>
-              <li>Submit the form to receive your estimate</li>
-            </ol>
-          </div>
-          <button class="no-print" onclick="window.print()">Print</button>
+          <script>
+            window.onload = function() {
+              window.print();
+              setTimeout(function() { window.close(); }, 500);
+            };
+          </script>
         </body>
       </html>
     `)
 
     printWindow.document.close()
-    printWindow.focus()
+  }
+
+  // Handle copy URL to clipboard
+  const handleCopyUrl = () => {
+    navigator.clipboard.writeText(qrUrl)
+    toast({
+      title: "URL Copied",
+      description: "The assessment URL has been copied to clipboard.",
+    })
   }
 
   return (
@@ -196,21 +154,21 @@ export default function QRGeneratorPage() {
         <Card>
           <CardHeader>
             <CardTitle>Generate QR Code</CardTitle>
-            <CardDescription>Create a QR code that customers can scan to complete a self-assessment</CardDescription>
+            <CardDescription>Create a QR code for customer self-assessment</CardDescription>
           </CardHeader>
-
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="vehicle">Vehicle (Optional)</Label>
-              <Select value={selectedVehicle} onValueChange={setSelectedVehicle}>
+              <Select value={vehicleId} onValueChange={setVehicleId}>
                 <SelectTrigger id="vehicle">
-                  <SelectValue placeholder="Select a vehicle (optional)" />
+                  <SelectValue placeholder="Select a vehicle or leave blank" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No specific vehicle</SelectItem>
                   {vehicles?.map((vehicle) => (
                     <SelectItem key={vehicle._id} value={vehicle._id}>
-                      {vehicle.year} {vehicle.make} {vehicle.model} ({vehicle.licensePlate})
+                      {vehicle.year} {vehicle.make} {vehicle.model}{" "}
+                      {vehicle.licensePlate ? `(${vehicle.licensePlate})` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -218,27 +176,34 @@ export default function QRGeneratorPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="expiry">Expiry Time (Hours)</Label>
-              <Input
-                id="expiry"
-                type="number"
-                min="1"
-                max="168"
-                value={expiryHours}
-                onChange={(e) => setExpiryHours(Number.parseInt(e.target.value) || 24)}
-              />
+              <Label htmlFor="expiry">Expiry Time</Label>
+              <Select value={expiryHours.toString()} onValueChange={(value) => setExpiryHours(Number.parseInt(value))}>
+                <SelectTrigger id="expiry">
+                  <SelectValue placeholder="Select expiry time" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">1 hour</SelectItem>
+                  <SelectItem value="4">4 hours</SelectItem>
+                  <SelectItem value="8">8 hours</SelectItem>
+                  <SelectItem value="24">24 hours</SelectItem>
+                  <SelectItem value="48">48 hours</SelectItem>
+                  <SelectItem value="168">7 days</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </CardContent>
-
           <CardFooter>
-            <Button onClick={handleGenerateQR} disabled={generating} className="w-full">
+            <Button onClick={handleGenerateToken} disabled={generating} className="w-full">
               {generating ? (
                 <>
                   <Spinner className="mr-2" size="sm" />
                   Generating...
                 </>
               ) : (
-                "Generate QR Code"
+                <>
+                  <QrCode className="mr-2 h-4 w-4" />
+                  Generate QR Code
+                </>
               )}
             </Button>
           </CardFooter>
@@ -247,43 +212,43 @@ export default function QRGeneratorPage() {
         <Card>
           <CardHeader>
             <CardTitle>QR Code</CardTitle>
-            <CardDescription>Scan this code to access the self-assessment form</CardDescription>
+            <CardDescription>Scan this code to access the assessment form</CardDescription>
           </CardHeader>
-
-          <CardContent className="flex flex-col items-center">
-            {qrCodeSVG ? (
-              <div
-                ref={qrCodeRef}
-                className="w-64 h-64 flex items-center justify-center"
-                dangerouslySetInnerHTML={{ __html: qrCodeSVG }}
-              />
+          <CardContent className="flex flex-col items-center justify-center">
+            {qrUrl ? (
+              <>
+                <div className="bg-white p-4 rounded-lg mb-4">
+                  <QRCode id="qr-code" value={qrUrl} size={200} level="H" includeMargin renderAs="canvas" />
+                </div>
+                <div className="w-full">
+                  <Label htmlFor="qr-url">Assessment URL</Label>
+                  <div className="flex mt-1">
+                    <Input id="qr-url" value={qrUrl} readOnly className="flex-1" />
+                    <Button variant="outline" onClick={handleCopyUrl} className="ml-2">
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </>
             ) : (
-              <div className="w-64 h-64 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center text-gray-400">
-                QR code will appear here
-              </div>
-            )}
-
-            {qrCodeToken && (
-              <div className="mt-4 text-sm text-gray-500 text-center">
-                <p>
-                  URL: {window.location.origin}/public/assess/{qrCodeToken}
-                </p>
-                <p className="mt-1">Expires in {expiryHours} hours</p>
+              <div className="text-center p-12 border border-dashed rounded-lg">
+                <QrCode className="h-12 w-12 mx-auto text-gray-300 mb-4" />
+                <p className="text-gray-500">Generate a QR code to display here</p>
               </div>
             )}
           </CardContent>
-
-          <CardFooter className="flex justify-between">
-            <Button variant="outline" onClick={handleDownloadSVG} disabled={!qrCodeSVG}>
-              Download SVG
-            </Button>
-            <Button variant="outline" onClick={handleDownloadPNG} disabled={!qrCodeSVG}>
-              Download PNG
-            </Button>
-            <Button onClick={handlePrint} disabled={!qrCodeSVG}>
-              Print
-            </Button>
-          </CardFooter>
+          {qrUrl && (
+            <CardFooter className="flex justify-between">
+              <Button variant="outline" onClick={handleDownloadQR}>
+                <Download className="mr-2 h-4 w-4" />
+                Download
+              </Button>
+              <Button variant="outline" onClick={handlePrintQR}>
+                <Printer className="mr-2 h-4 w-4" />
+                Print
+              </Button>
+            </CardFooter>
+          )}
         </Card>
       </div>
     </div>

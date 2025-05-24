@@ -3,13 +3,12 @@ import { v } from "convex/values"
 
 export default mutation({
   args: {
-    assessmentId: v.id("assessments"),
+    assessmentId: v.id("selfAssessments"),
     tenantId: v.string(),
   },
   handler: async (ctx, args) => {
     // Get the assessment
     const assessment = await ctx.db.get(args.assessmentId)
-
     if (!assessment) {
       throw new Error("Assessment not found")
     }
@@ -18,76 +17,153 @@ export default mutation({
       throw new Error("Unauthorized: Assessment does not belong to this tenant")
     }
 
+    // Get tenant configuration
+    const tenant = await ctx.db.get(assessment.tenantId)
+    if (!tenant) {
+      throw new Error("Tenant not found")
+    }
+
+    const tenantConfig = {
+      basePackagePrice: tenant.basePackagePrice || 0,
+      technicianRate: tenant.technicianRate || 40, // Default $40/hour
+      seasonalMultiplier: tenant.seasonalMultiplier || 1.0,
+      loyaltyDiscount: tenant.loyaltyDiscount || 0,
+    }
+
     // Get pricing rules for this tenant
     const pricingRules = await ctx.db
       .query("pricingRules")
-      .withIndex("by_tenant", (q) => q.eq("tenantId", args.tenantId))
+      .withIndex("by_tenant_and_service", (q) => q.eq("tenantId", args.tenantId))
       .filter((q) => q.eq(q.field("active"), true))
       .collect()
 
-    // If no AI analysis, use a default estimate
-    if (!assessment.aiAnalysis) {
-      const defaultEstimate = 150 // Default estimate in dollars
-      const defaultDuration = 60 // Default duration in minutes
-
-      await ctx.db.patch(args.assessmentId, {
-        estimatedPrice: defaultEstimate,
-        estimatedDuration: defaultDuration,
-        updatedAt: Date.now(),
-      })
-
-      return {
-        success: true,
-        estimatedPrice: defaultEstimate,
-        estimatedDuration: defaultDuration,
-      }
-    }
-
-    // Calculate estimate based on detected issues
-    let totalPrice = 0
+    // Initialize calculation variables
+    let subtotal = 0
     let totalDuration = 0
+    let extraDamageCharges = 0
+    const customCharges = []
+    const lineItems = []
 
-    // Base price for inspection
-    const baseInspectionPrice = 50
-    const baseInspectionDuration = 30
-    totalPrice += baseInspectionPrice
-    totalDuration += baseInspectionDuration
+    // Process checklist selections
+    const checklistSelections = assessment.checklistSelections || []
+    for (const item of checklistSelections) {
+      const serviceKey = `${item.category}_${item.issue}`.toLowerCase()
 
-    // Add price for each detected issue
-    for (const issue of assessment.aiAnalysis.detectedIssues) {
-      // Find matching pricing rule or use default
-      const matchingRule = pricingRules.find((rule) =>
-        rule.serviceName.toLowerCase().includes(issue.type.toLowerCase()),
+      // Find matching pricing rule
+      const rule = pricingRules.find(
+        (r) => r.serviceName.toLowerCase() === serviceKey || r.serviceName.toLowerCase() === item.issue.toLowerCase(),
       )
 
-      if (matchingRule) {
-        // Apply severity multiplier (1-5 scale)
-        const severityMultiplier = issue.severity / 3
-        totalPrice += matchingRule.basePrice * severityMultiplier
-        totalDuration += matchingRule.duration
+      if (rule) {
+        subtotal += rule.basePrice
+        totalDuration += rule.duration
+        lineItems.push({
+          description: `${item.location} ${item.issue}`,
+          price: rule.basePrice,
+          duration: rule.duration,
+        })
       } else {
-        // Default pricing if no rule matches
-        const defaultPrice = issue.severity * 25 // $25 per severity point
-        const defaultDuration = issue.severity * 10 // 10 minutes per severity point
-        totalPrice += defaultPrice
-        totalDuration += defaultDuration
+        // Flag as custom charge
+        customCharges.push({
+          description: `${item.location} ${item.issue}`,
+          needsReview: true,
+        })
       }
     }
 
-    // Round to nearest dollar
-    totalPrice = Math.round(totalPrice)
+    // Process AI-detected damage tags
+    const damageTagsAI = assessment.damageTagsAI || []
+    for (const tag of damageTagsAI) {
+      // Skip if already included in checklist
+      const alreadyIncluded = checklistSelections.some((item) =>
+        `${item.location} ${item.issue}`.toLowerCase().includes(tag.toLowerCase()),
+      )
+
+      if (alreadyIncluded) continue
+
+      // Find matching pricing rule
+      const rule = pricingRules.find((r) => tag.toLowerCase().includes(r.serviceName.toLowerCase()))
+
+      if (rule) {
+        extraDamageCharges += rule.basePrice
+        totalDuration += rule.duration
+        lineItems.push({
+          description: `AI-detected: ${tag}`,
+          price: rule.basePrice,
+          duration: rule.duration,
+          aiDetected: true,
+        })
+      } else {
+        // Flag as custom charge
+        customCharges.push({
+          description: `AI-detected: ${tag}`,
+          needsReview: true,
+          aiDetected: true,
+        })
+      }
+    }
+
+    // Apply base package if applicable
+    if (tenantConfig.basePackagePrice > 0) {
+      subtotal += tenantConfig.basePackagePrice
+      lineItems.push({
+        description: "Base Package",
+        price: tenantConfig.basePackagePrice,
+        isPackage: true,
+      })
+    }
+
+    // Calculate labor cost
+    const laborCost = (totalDuration / 60) * tenantConfig.technicianRate // Convert minutes to hours
+
+    // Apply seasonal multiplier
+    const seasonalAdjustment = (subtotal + extraDamageCharges) * (tenantConfig.seasonalMultiplier - 1)
+
+    // Apply loyalty discount
+    const loyaltyDiscount = (subtotal + extraDamageCharges + seasonalAdjustment) * tenantConfig.loyaltyDiscount
+
+    // Calculate total
+    const totalCost = subtotal + extraDamageCharges + laborCost + seasonalAdjustment - loyaltyDiscount
+
+    // Create itemized estimate
+    const itemizedEstimate = {
+      lineItems,
+      customCharges,
+      laborCost: {
+        duration: totalDuration,
+        rate: tenantConfig.technicianRate,
+        cost: laborCost,
+      },
+      adjustments: [
+        {
+          description: "Seasonal Adjustment",
+          multiplier: tenantConfig.seasonalMultiplier,
+          amount: seasonalAdjustment,
+        },
+        {
+          description: "Loyalty Discount",
+          percentage: tenantConfig.loyaltyDiscount * 100,
+          amount: -loyaltyDiscount,
+        },
+      ],
+      subtotal,
+      extraDamageCharges,
+      totalCost: Math.round(totalCost * 100) / 100, // Round to 2 decimal places
+    }
 
     // Update the assessment with the estimate
     await ctx.db.patch(args.assessmentId, {
-      estimatedPrice: totalPrice,
+      estimatedPrice: itemizedEstimate.totalCost,
       estimatedDuration: totalDuration,
+      itemizedEstimate,
       updatedAt: Date.now(),
     })
 
     return {
       success: true,
-      estimatedPrice: totalPrice,
+      estimatedPrice: itemizedEstimate.totalCost,
       estimatedDuration: totalDuration,
+      itemizedEstimate,
     }
   },
 })

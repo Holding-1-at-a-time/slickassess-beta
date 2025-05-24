@@ -17,13 +17,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/use-toast"
 import { FileUploader } from "@/components/FileUploader"
 
-interface AssessmentPageProps {
-  params: {
-    token: string
-  }
-}
-
-export default function AssessmentPage({ params }: AssessmentPageProps) {
+export default function AssessmentPage({ params }: { params: { token: string } }) {
   const { token } = params
   const router = useRouter()
 
@@ -59,9 +53,10 @@ export default function AssessmentPage({ params }: AssessmentPageProps) {
   const assessmentData = useQuery(api.assessments.getAssessmentByToken, tokenValidation?.valid ? { token } : null)
 
   // Mutations
-  const createSelfAssessment = useMutation(api.assessments.createSelfAssessment)
+  const generateUploadUrl = useMutation(api.files.generateUploadUrl)
+  const storeFileMetadata = useMutation(api.files.storeFileMetadata)
+  const analyzeDamage = useMutation(api.assessments.analyzeDamage)
   const markTokenUsed = useMutation(api.assessmentTokens.markTokenUsed)
-  const generateUploadUrl = useMutation(api.storage.generateUploadUrl)
 
   // Initialize form data when template is loaded
   useEffect(() => {
@@ -104,8 +99,12 @@ export default function AssessmentPage({ params }: AssessmentPageProps) {
 
       for (const file of files) {
         // Get a presigned URL for upload
-        const { uploadUrl, storageId } = await generateUploadUrl({
-          contentType: file.type,
+        const uploadUrl = await generateUploadUrl({
+          tenantId: tokenValidation!.tenantId,
+          category: "assessment_image",
+          fileName: file.name,
+          fileType: file.type,
+          fileSize: file.size,
         })
 
         // Upload the file
@@ -118,6 +117,22 @@ export default function AssessmentPage({ params }: AssessmentPageProps) {
         if (!result.ok) {
           throw new Error(`Failed to upload image: ${result.statusText}`)
         }
+
+        // Store file metadata
+        const storageId = new URL(uploadUrl).pathname.split("/").pop()!
+        const fileMetadata = await storeFileMetadata({
+          storageId,
+          tenantId: tokenValidation!.tenantId,
+          fileName: file.name,
+          fileType: file.type,
+          fileSize: file.size,
+          mimeType: file.type,
+          category: "assessment_image",
+          metadata: {
+            vehicleId: tokenValidation?.vehicleId,
+          },
+          isPublic: true,
+        })
 
         // Get the URL for the uploaded file
         const imageUrl = `${window.location.origin}/api/storage/${storageId}`
@@ -143,6 +158,27 @@ export default function AssessmentPage({ params }: AssessmentPageProps) {
     }
   }
 
+  // Convert form data to checklist format
+  const formDataToChecklist = () => {
+    const items = formData.sections.flatMap((section) =>
+      section.items
+        .filter((item) => {
+          if (item.type === "checkbox") return item.value === true
+          if (item.type === "text" || item.type === "select") return item.value && item.value.trim() !== ""
+          return false
+        })
+        .map((item) => ({
+          category: section.title,
+          location: item.label.split(" - ")[0] || section.title,
+          issue: item.label.split(" - ")[1] || item.label,
+          severity: typeof item.value === "number" ? item.value : undefined,
+          notes: typeof item.value === "string" ? item.value : undefined,
+        })),
+    )
+
+    return { items }
+  }
+
   // Handle form submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -159,13 +195,15 @@ export default function AssessmentPage({ params }: AssessmentPageProps) {
     setSubmitting(true)
 
     try {
-      // Create the assessment
-      const result = await createSelfAssessment({
-        tokenId: tokenValidation.tokenId,
+      // Convert form data to checklist format
+      const checklist = formDataToChecklist()
+
+      // Create the assessment with damage analysis
+      const result = await analyzeDamage({
         tenantId: tokenValidation.tenantId,
         vehicleId: tokenValidation.vehicleId,
-        formData,
-        images: uploadedImages,
+        imageUrls: uploadedImages,
+        checklist,
       })
 
       // Mark the token as used
