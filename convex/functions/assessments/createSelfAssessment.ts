@@ -1,11 +1,12 @@
 import { mutation } from "../../_generated/server"
 import { v } from "convex/values"
+import { internal } from "../../_generated/api"
 
 export default mutation({
   args: {
     tokenId: v.id("assessmentTokens"),
     tenantId: v.string(),
-    vehicleId: v.optional(v.string()),
+    vehicleId: v.optional(v.id("vehicles")),
     formData: v.object({
       sections: v.array(
         v.object({
@@ -23,52 +24,29 @@ export default mutation({
         }),
       ),
     }),
-    images: v.optional(v.array(v.string())),
+    images: v.array(v.string()),
   },
   handler: async (ctx, args) => {
-    // Validate the token
-    const token = await ctx.db.get(args.tokenId)
-
-    if (!token) {
-      throw new Error("Invalid token")
-    }
-
-    if (token.used) {
-      throw new Error("Token already used")
-    }
-
-    if (token.expiresAt < Date.now()) {
-      throw new Error("Token expired")
-    }
-
-    if (token.tenantId !== args.tenantId) {
-      throw new Error("Token does not match tenant")
-    }
-
     // Create the assessment
     const assessmentId = await ctx.db.insert("assessments", {
       tenantId: args.tenantId,
-      vehicleId: args.vehicleId || token.vehicleId,
+      vehicleId: args.vehicleId,
       status: "pending",
       formData: args.formData,
-      images: args.images || [],
+      images: args.images,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     })
 
-    // Mark the token as used
-    await ctx.db.patch(args.tokenId, {
-      used: true,
-    })
-
-    // Schedule AI analysis if images are provided
-    if (args.images && args.images.length > 0) {
-      await ctx.scheduler.runAfter(0, "assessments/analyzeImages", {
+    // If there are images, trigger AI analysis
+    if (args.images.length > 0) {
+      // Schedule AI analysis as a background task
+      await ctx.scheduler.runAfter(0, internal.assessments.analyzeImages, {
         assessmentId,
         tenantId: args.tenantId,
       })
     }
 
-    return { assessmentId }
+    return { success: true, assessmentId }
   },
 })

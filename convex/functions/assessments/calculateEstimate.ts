@@ -15,63 +15,79 @@ export default mutation({
     }
 
     if (assessment.tenantId !== args.tenantId) {
-      throw new Error("Unauthorized")
-    }
-
-    if (!assessment.aiAnalysis) {
-      throw new Error("Assessment has not been analyzed yet")
+      throw new Error("Unauthorized: Assessment does not belong to this tenant")
     }
 
     // Get pricing rules for this tenant
     const pricingRules = await ctx.db
       .query("pricingRules")
-      .withIndex("by_tenant_and_service", (q) => q.eq("tenantId", args.tenantId))
+      .withIndex("by_tenant", (q) => q.eq("tenantId", args.tenantId))
       .filter((q) => q.eq(q.field("active"), true))
       .collect()
+
+    // If no AI analysis, use a default estimate
+    if (!assessment.aiAnalysis) {
+      const defaultEstimate = 150 // Default estimate in dollars
+      const defaultDuration = 60 // Default duration in minutes
+
+      await ctx.db.patch(args.assessmentId, {
+        estimatedPrice: defaultEstimate,
+        estimatedDuration: defaultDuration,
+        updatedAt: Date.now(),
+      })
+
+      return {
+        success: true,
+        estimatedPrice: defaultEstimate,
+        estimatedDuration: defaultDuration,
+      }
+    }
 
     // Calculate estimate based on detected issues
     let totalPrice = 0
     let totalDuration = 0
 
+    // Base price for inspection
+    const baseInspectionPrice = 50
+    const baseInspectionDuration = 30
+    totalPrice += baseInspectionPrice
+    totalDuration += baseInspectionDuration
+
+    // Add price for each detected issue
     for (const issue of assessment.aiAnalysis.detectedIssues) {
-      // Find matching pricing rule
-      const rule = pricingRules.find((r) => r.serviceName === issue.type)
+      // Find matching pricing rule or use default
+      const matchingRule = pricingRules.find((rule) =>
+        rule.serviceName.toLowerCase().includes(issue.type.toLowerCase()),
+      )
 
-      if (rule) {
+      if (matchingRule) {
         // Apply severity multiplier (1-5 scale)
-        const severityMultiplier = 0.8 + issue.severity * 0.1 // 0.9 to 1.3
-
-        // Apply confidence adjustment (only if high confidence)
-        const confidenceAdjustment = issue.confidence > 0.8 ? 1 : 0.8
-
-        // Calculate price for this issue
-        const issuePrice = rule.basePrice * severityMultiplier * confidenceAdjustment
-
-        // Calculate duration for this issue
-        const issueDuration = rule.duration * severityMultiplier
-
-        totalPrice += issuePrice
-        totalDuration += issueDuration
+        const severityMultiplier = issue.severity / 3
+        totalPrice += matchingRule.basePrice * severityMultiplier
+        totalDuration += matchingRule.duration
+      } else {
+        // Default pricing if no rule matches
+        const defaultPrice = issue.severity * 25 // $25 per severity point
+        const defaultDuration = issue.severity * 10 // 10 minutes per severity point
+        totalPrice += defaultPrice
+        totalDuration += defaultDuration
       }
     }
 
-    // Apply any seasonal or other multipliers (simplified for now)
-    // In a real implementation, you would check for holidays, weekends, etc.
-    const isWeekend = new Date().getDay() === 0 || new Date().getDay() === 6
-    const weekendMultiplier = isWeekend ? 1.2 : 1
-
-    totalPrice *= weekendMultiplier
+    // Round to nearest dollar
+    totalPrice = Math.round(totalPrice)
 
     // Update the assessment with the estimate
     await ctx.db.patch(args.assessmentId, {
-      estimatedPrice: Math.round(totalPrice * 100) / 100, // Round to 2 decimal places
-      estimatedDuration: Math.ceil(totalDuration), // Round up to nearest minute
+      estimatedPrice: totalPrice,
+      estimatedDuration: totalDuration,
       updatedAt: Date.now(),
     })
 
     return {
-      estimatedPrice: Math.round(totalPrice * 100) / 100,
-      estimatedDuration: Math.ceil(totalDuration),
+      success: true,
+      estimatedPrice: totalPrice,
+      estimatedDuration: totalDuration,
     }
   },
 })

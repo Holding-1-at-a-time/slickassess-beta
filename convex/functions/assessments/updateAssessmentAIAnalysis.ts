@@ -26,13 +26,12 @@ export default mutation({
     }
 
     if (assessment.tenantId !== args.tenantId) {
-      throw new Error("Unauthorized")
+      throw new Error("Unauthorized: Assessment does not belong to this tenant")
     }
 
-    // Update the assessment with the AI analysis
+    // Update the assessment with AI analysis
     await ctx.db.patch(args.assessmentId, {
       aiAnalysis: args.aiAnalysis,
-      status: "in_progress",
       updatedAt: Date.now(),
     })
 

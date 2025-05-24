@@ -23,6 +23,16 @@ export default internalAction({
     }
 
     try {
+      // Update status to in_progress
+      await ctx.runMutation("assessments/updateAssessment", {
+        assessmentId: args.assessmentId,
+        tenantId: args.tenantId,
+        updates: {
+          status: "in_progress",
+          updatedAt: Date.now(),
+        },
+      })
+
       // Call the AI service to analyze the images
       const aiAnalysis = await analyzeImagesWithGPT4V(assessment.images, assessment.formData)
 
@@ -39,6 +49,16 @@ export default internalAction({
         tenantId: args.tenantId,
       })
 
+      // Update status to completed
+      await ctx.runMutation("assessments/updateAssessment", {
+        assessmentId: args.assessmentId,
+        tenantId: args.tenantId,
+        updates: {
+          status: "completed",
+          updatedAt: Date.now(),
+        },
+      })
+
       return { success: true }
     } catch (error) {
       console.error("Error analyzing images:", error)
@@ -48,7 +68,7 @@ export default internalAction({
         assessmentId: args.assessmentId,
         tenantId: args.tenantId,
         updates: {
-          status: "in_progress",
+          status: "pending", // Reset to pending so it can be retried
           updatedAt: Date.now(),
         },
       })

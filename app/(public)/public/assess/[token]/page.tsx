@@ -1,11 +1,11 @@
 "use client"
 
 import type React from "react"
+
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useQuery, useMutation } from "convex/react"
 import { api } from "@/convex/_generated/api"
-import type { Id } from "@/convex/_generated/dataModel"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -61,7 +61,7 @@ export default function AssessmentPage({ params }: AssessmentPageProps) {
   // Mutations
   const createSelfAssessment = useMutation(api.assessments.createSelfAssessment)
   const markTokenUsed = useMutation(api.assessmentTokens.markTokenUsed)
-  const uploadImage = useMutation(api.storage.generateUploadUrl)
+  const generateUploadUrl = useMutation(api.storage.generateUploadUrl)
 
   // Initialize form data when template is loaded
   useEffect(() => {
@@ -104,7 +104,9 @@ export default function AssessmentPage({ params }: AssessmentPageProps) {
 
       for (const file of files) {
         // Get a presigned URL for upload
-        const { uploadUrl, storageId } = await uploadImage()
+        const { uploadUrl, storageId } = await generateUploadUrl({
+          contentType: file.type,
+        })
 
         // Upload the file
         const result = await fetch(uploadUrl, {
@@ -159,15 +161,15 @@ export default function AssessmentPage({ params }: AssessmentPageProps) {
     try {
       // Create the assessment
       const result = await createSelfAssessment({
-        tokenId: tokenValidation.tokenId as Id<"assessmentTokens">,
+        tokenId: tokenValidation.tokenId,
         tenantId: tokenValidation.tenantId,
-        vehicleId: tokenValidation.vehicleId as Id<"vehicles"> | undefined,
+        vehicleId: tokenValidation.vehicleId,
         formData,
         images: uploadedImages,
       })
 
       // Mark the token as used
-      await markTokenUsed({ tokenId: tokenValidation.tokenId as Id<"assessmentTokens"> })
+      await markTokenUsed({ tokenId: tokenValidation.tokenId })
 
       // Redirect to success page
       router.push(`/public/assess/success?id=${result.assessmentId}`)

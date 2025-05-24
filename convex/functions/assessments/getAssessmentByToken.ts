@@ -6,7 +6,7 @@ export default query({
     token: v.string(),
   },
   handler: async (ctx, args) => {
-    // Find the token
+    // Validate the token
     const tokenRecord = await ctx.db
       .query("assessmentTokens")
       .withIndex("by_token", (q) => q.eq("token", args.token))
@@ -16,27 +16,21 @@ export default query({
       return null
     }
 
-    // Get the tenant's form template
-    const tenant = await ctx.db
-      .query("tenants")
-      .filter((q) => q.eq(q.field("_id"), tokenRecord.tenantId))
-      .first()
+    // Get the tenant
+    const tenant = await ctx.db.get(tokenRecord.tenantId)
 
-    if (!tenant) {
-      return null
-    }
+    // Get the vehicle if available
+    const vehicle = tokenRecord.vehicleId ? await ctx.db.get(tokenRecord.vehicleId) : null
 
-    // Get vehicle info if vehicleId is provided
-    let vehicle = null
-    if (tokenRecord.vehicleId) {
-      vehicle = await ctx.db.get(tokenRecord.vehicleId)
+    // Get the form template from the tenant
+    const formTemplate = tenant?.assessmentFormTemplate || {
+      sections: [],
     }
 
     return {
-      token: tokenRecord,
-      tenant,
+      tenant: tenant ? { name: tenant.name, _id: tenant._id } : null,
       vehicle,
-      formTemplate: tenant.assessmentFormTemplate,
+      formTemplate,
     }
   },
 })
