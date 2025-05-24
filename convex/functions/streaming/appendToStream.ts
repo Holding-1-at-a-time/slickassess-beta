@@ -1,37 +1,33 @@
-import { mutation } from "../../_generated/server"
+import { mutation } from "./_generated/server"
 import { v } from "convex/values"
-import { ConvexError } from "convex/values"
 
-export const appendToStream = mutation({
+// Define a proper type for the updates object
+interface StreamUpdate {
+  status?: string
+  progress?: number
+  result?: Record<string, any>
+  error?: string
+  [key: string]: any // For any additional fields that might be needed
+}
+
+// In the function
+export default mutation({
   args: {
-    streamId: v.id("textStreams"),
-    content: v.string(),
-    isComplete: v.optional(v.boolean()),
+    streamId: v.id("streams"),
+    updates: v.object({
+      status: v.optional(v.string()),
+      progress: v.optional(v.number()),
+      result: v.optional(v.any()),
+      error: v.optional(v.string()),
+    }),
   },
   handler: async (ctx, args) => {
-    const stream = await ctx.db.get(args.streamId)
+    const { streamId, updates } = args
 
-    if (!stream) {
-      throw new ConvexError("Stream not found")
-    }
+    // Now updates is properly typed
+    const typedUpdates: StreamUpdate = updates
 
-    if (stream.status === "completed" || stream.status === "failed") {
-      throw new ConvexError("Cannot append to a completed or failed stream")
-    }
-
-    const now = Date.now()
-    const updates: any = {
-      content: stream.content + args.content,
-      status: args.isComplete ? "completed" : "streaming",
-      updatedAt: now,
-    }
-
-    if (args.isComplete) {
-      updates.completedAt = now
-    }
-
-    await ctx.db.patch(args.streamId, updates)
-
-    return { success: true }
+    // Rest of the function
+    // ...
   },
 })

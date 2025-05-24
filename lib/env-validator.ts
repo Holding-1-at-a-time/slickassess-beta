@@ -59,6 +59,33 @@ const validationRules: Record<keyof EnvironmentConfig, ValidationRule> = {
   },
 }
 
+type ValidationOptions = {
+  required?: boolean
+  pattern?: RegExp
+  errorMessage?: string
+}
+
+/**
+ * Validates an environment variable exists and matches the expected format
+ * @param name The name of the environment variable
+ * @param options Validation options
+ * @returns The validated environment variable value
+ * @throws Error if validation fails
+ */
+export function validateEnvVar(name: string, options: ValidationOptions = {}): string {
+  const value = process.env[name]
+
+  if (options.required && (!value || value.trim() === "")) {
+    throw new Error(`Environment variable ${name} is required but not set`)
+  }
+
+  if (value && options.pattern && !options.pattern.test(value)) {
+    throw new Error(options.errorMessage || `Environment variable ${name} has invalid format`)
+  }
+
+  return value || ""
+}
+
 /**
  * Validates environment variables at startup
  */
