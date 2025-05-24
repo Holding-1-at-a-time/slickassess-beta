@@ -99,7 +99,7 @@ export default function AssessmentTemplatePage() {
     }
 
     setTemplate((prev) => {
-      if (!prev) return prev
+      if (!prev) {
       return {
         ...prev,
         sections: [...prev.sections, newSection],
