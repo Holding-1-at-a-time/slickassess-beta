@@ -111,7 +111,7 @@ export default function AssessmentTemplatePage() {
 
   // Remove a section
   const removeSection = (sectionId: string) => {
-    if (!template) return
+    if (!template) {
 
     setTemplate((prev) => {
       if (!prev) {
