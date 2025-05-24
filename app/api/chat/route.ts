@@ -1,11 +1,39 @@
+/**
+ * Chat API endpoint
+ *
+ * Provides AI-powered booking assistance using Together AI and Convex
+ *
+ * @see {@link file://./README.md} for detailed documentation
+ */
+
 import { streamText } from "ai"
 import { Together } from "together-ai"
-import { fetchAvailableSlots } from "@/convex/functions/fetchAvailableSlots"
-import { createBooking } from "@/convex/functions/createBooking"
+import { api } from "@/convex/_generated/api"
+import { ConvexHttpClient } from "convex/browser"
+import { ValidationError, ExternalServiceError, ConfigurationError } from "@/lib/errors"
+import { getConfig } from "@/lib/env-validator"
+import { withMiddleware, withErrorHandler, withRateLimit } from "@/middleware/error-handler"
+import type { NextRequest } from "next/server"
 
-// Initialize the Together AI client with validation
-const apiKey = process.env.TOGETHER_API_KEY
-const together = apiKey ? new Together({ apiKey }) : null
+// Initialize Together AI client
+let together: Together | null = null
+
+try {
+  const config = getConfig()
+  together = new Together({ apiKey: config.TOGETHER_API_KEY })
+} catch (error) {
+  console.error("Failed to initialize Together AI client:", error)
+}
+
+// Initialize Convex client
+let convex: ConvexHttpClient | null = null
+
+try {
+  const config = getConfig()
+  convex = new ConvexHttpClient(config.NEXT_PUBLIC_CONVEX_URL)
+} catch (error) {
+  console.error("Failed to initialize Convex client:", error)
+}
 
 // Define the tools that the AI can use
 const tools = [
@@ -85,112 +113,102 @@ const tools = [
   },
 ]
 
-export async function POST(req: Request) {
+async function handler(req: NextRequest) {
+  // Check if services are initialized
+  if (!together || !convex) {
+    throw new ConfigurationError("AI services not properly configured. Please check your environment variables.")
+  }
+
+  // Parse and validate request body
+  const body = await req.json()
+  const { messages, tenantId, vehicleId } = body
+
+  // Validate required parameters
+  if (!messages || !Array.isArray(messages)) {
+    throw new ValidationError("Invalid messages format - must be an array")
+  }
+
+  if (!tenantId) {
+    throw new ValidationError("Tenant ID is required")
+  }
+
+  // Create AI stream
   try {
-    // Check if Together AI client is initialized
-    if (!together) {
-      console.error("Together AI client not initialized - missing API key")
-      return Response.redirect(new URL("/api/chat/fallback", req.url), 307)
-    }
+    const result = await streamText({
+      model: together.chat("Qwen/Qwen2-1.5B-Instruct"),
+      messages,
+      tools,
+      toolChoice: "auto",
+      onToolCall: async (toolCall) => {
+        try {
+          const { name, arguments: args } = toolCall.function
 
-    // Extract the messages from the request
-    const { messages, tenantId, vehicleId } = await req.json()
+          if (name === "fetchAvailableSlots") {
+            const parsedArgs = JSON.parse(args)
 
-    // Validate required parameters
-    if (!messages || !Array.isArray(messages)) {
-      return new Response(JSON.stringify({ error: "Invalid messages format" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      })
-    }
-
-    // Create a stream using the new AI SDK 4.0 syntax
-    try {
-      const result = await streamText({
-        model: together.chat("Qwen/Qwen2-1.5B-Instruct"),
-        messages,
-        tools,
-        toolChoice: "auto",
-        onToolCall: async (toolCall) => {
-          try {
-            const { name, arguments: args } = toolCall.function
-
-            if (name === "fetchAvailableSlots") {
-              try {
-                const parsedArgs = JSON.parse(args)
-                const slots = await fetchAvailableSlots({
-                  startDate: parsedArgs.startDate,
-                  endDate: parsedArgs.endDate,
-                  duration: parsedArgs.duration,
-                })
-                return { slots }
-              } catch (error) {
-                console.error("Error fetching available slots:", error)
-                return {
-                  error: "Failed to fetch available slots",
-                  slots: [],
-                }
-              }
+            // Validate tool arguments
+            if (!parsedArgs.startDate || !parsedArgs.endDate || !parsedArgs.duration) {
+              throw new ValidationError("Missing required parameters for fetchAvailableSlots")
             }
 
-            if (name === "createBooking") {
-              try {
-                const parsedArgs = JSON.parse(args)
+            const slots = await convex!.action(api.bookings.fetchAvailableSlots, {
+              startDate: parsedArgs.startDate,
+              endDate: parsedArgs.endDate,
+              duration: parsedArgs.duration,
+            })
 
-                // Validate required parameters
-                if (!tenantId && !parsedArgs.tenantId) {
-                  return { error: "Missing tenantId parameter" }
-                }
-
-                if (!vehicleId && !parsedArgs.vehicleId) {
-                  return { error: "Missing vehicleId parameter" }
-                }
-
-                const result = await createBooking({
-                  tenantId: tenantId || parsedArgs.tenantId,
-                  vehicleId: vehicleId || parsedArgs.vehicleId,
-                  serviceType: parsedArgs.serviceType,
-                  startTime: parsedArgs.startTime,
-                  endTime: parsedArgs.endTime,
-                  notes: parsedArgs.notes,
-                  customerEmail: parsedArgs.customerEmail,
-                  customerName: parsedArgs.customerName,
-                  customerPhone: parsedArgs.customerPhone,
-                })
-
-                return {
-                  success: true,
-                  bookingId: result.bookingId,
-                  googleEventId: result.googleEventId,
-                }
-              } catch (error) {
-                console.error("Error creating booking:", error)
-                return {
-                  error: "Failed to create booking",
-                  details: error instanceof Error ? error.message : "Unknown error",
-                }
-              }
-            }
-
-            return { error: `Unknown tool: ${name}` }
-          } catch (error) {
-            console.error("Error in tool call:", error)
-            return { error: "Tool call failed" }
+            return { slots }
           }
-        },
-      })
 
-      // Convert the result to a stream response
-      return result.toDataStreamResponse()
-    } catch (error) {
-      console.error("Error in AI stream:", error)
-      return Response.redirect(new URL("/api/chat/fallback", req.url), 307)
-    }
-  } catch (error) {
-    console.error("Error in chat API:", error)
-    return new Response(JSON.stringify({ error: "Internal server error" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
+          if (name === "createBooking") {
+            const parsedArgs = JSON.parse(args)
+
+            // Validate required parameters
+            if (!parsedArgs.serviceType || !parsedArgs.startTime || !parsedArgs.endTime) {
+              throw new ValidationError("Missing required parameters for createBooking")
+            }
+
+            const result = await convex!.mutation(api.bookings.create, {
+              tenantId: tenantId || parsedArgs.tenantId,
+              vehicleId: vehicleId || parsedArgs.vehicleId,
+              serviceType: parsedArgs.serviceType,
+              startTime: parsedArgs.startTime,
+              endTime: parsedArgs.endTime,
+              notes: parsedArgs.notes,
+              customerEmail: parsedArgs.customerEmail,
+              customerName: parsedArgs.customerName,
+              customerPhone: parsedArgs.customerPhone,
+            })
+
+            return {
+              success: true,
+              bookingId: result.bookingId,
+              googleEventId: result.googleEventId,
+            }
+          }
+
+          throw new ValidationError(`Unknown tool: ${name}`)
+        } catch (error) {
+          console.error("Error in tool call:", error)
+
+          if (error instanceof ValidationError) {
+            return { error: error.message }
+          }
+
+          return {
+            error: "Tool execution failed",
+            details: process.env.NODE_ENV === "development" ? error : undefined,
+          }
+        }
+      },
     })
+
+    // Convert the result to a stream response
+    return result.toDataStreamResponse()
+  } catch (error) {
+    throw new ExternalServiceError("Failed to process chat request", "Together AI", { originalError: error })
   }
 }
+
+// Export the handler with middleware
+export const POST = withMiddleware(handler, withRateLimit, withErrorHandler)

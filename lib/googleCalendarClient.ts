@@ -1,119 +1,144 @@
+/**
+ * Google Calendar Client
+ *
+ * This module provides a singleton client for interacting with Google Calendar API.
+ * It handles authentication, event management, and availability checking.
+ *
+ * @module googleCalendarClient
+ */
+
 import { google, type calendar_v3 } from "googleapis"
+import { ExternalServiceError, ConfigurationError, ValidationError, NotFoundError } from "./errors"
+import { getConfig } from "./env-validator"
 
-// Singleton instance
-let instance: GoogleCalendarClient | null = null
-
+/**
+ * Google Calendar Client class
+ * Provides methods for managing calendar events and checking availability
+ */
 export class GoogleCalendarClient {
   private calendar: calendar_v3.Calendar | null = null
-  private initialized = false
-  private initError: Error | null = null
+  private config: ReturnType<typeof getConfig>
 
   constructor() {
-    // Prevent multiple instances
-    if (instance) {
-      return instance
+    try {
+      this.config = getConfig()
+      this.initializeClient()
+    } catch (error) {
+      console.error("Failed to initialize Google Calendar client:", error)
+      // Don't throw - allow graceful degradation
     }
-
-    this.initialize()
-    instance = this
   }
 
-  private initialize() {
+  /**
+   * Initialize the Google Calendar API client
+   * @private
+   */
+  private initializeClient(): void {
     try {
-      // Validate required environment variables
-      const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
-      const privateKey = process.env.GOOGLE_PRIVATE_KEY
-      const calendarId = process.env.GOOGLE_CALENDAR_ID
-
-      if (!email) {
-        throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_EMAIL environment variable")
-      }
-
-      if (!privateKey) {
-        throw new Error("Missing GOOGLE_PRIVATE_KEY environment variable")
-      }
-
-      if (!calendarId) {
-        throw new Error("Missing GOOGLE_CALENDAR_ID environment variable")
-      }
-
-      // Create auth client
       const auth = new google.auth.JWT({
-        email,
-        key: privateKey.replace(/\\n/g, "\n"),
+        email: this.config.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+        key: this.config.GOOGLE_PRIVATE_KEY,
         scopes: ["https://www.googleapis.com/auth/calendar"],
       })
 
       this.calendar = google.calendar({ version: "v3", auth })
-      this.initialized = true
     } catch (error) {
-      console.error("Error initializing Google Calendar client:", error)
-      this.initError = error instanceof Error ? error : new Error(String(error))
-      this.initialized = false
+      throw new ConfigurationError("Failed to initialize Google Calendar client", { originalError: error })
     }
   }
 
-  private validateCalendarClient() {
-    if (!this.initialized) {
-      if (this.initError) {
-        throw this.initError
-      }
-      throw new Error("Google Calendar client not initialized properly")
-    }
-
+  /**
+   * Validate that the calendar client is properly initialized
+   * @private
+   * @throws {ConfigurationError} If the client is not initialized
+   */
+  private validateCalendarClient(): void {
     if (!this.calendar) {
-      throw new Error("Google Calendar client is null")
+      throw new ConfigurationError("Google Calendar client not initialized. Check your environment variables.")
     }
   }
 
+  /**
+   * Get available time slots within a date range
+   * @param startDate - Start date in ISO format
+   * @param endDate - End date in ISO format
+   * @param duration - Duration of each slot in minutes
+   * @returns Array of available time slots
+   */
   async getAvailableSlots(
     startDate: string,
     endDate: string,
-    duration: number, // in minutes
+    duration: number,
   ): Promise<{ startTime: string; endTime: string }[]> {
     try {
       this.validateCalendarClient()
 
+      // Validate inputs
+      if (!startDate || !endDate) {
+        throw new ValidationError("Start date and end date are required")
+      }
+
+      if (duration < 15 || duration > 480) {
+        throw new ValidationError("Duration must be between 15 and 480 minutes")
+      }
+
+      const start = new Date(startDate)
+      const end = new Date(endDate)
+
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        throw new ValidationError("Invalid date format")
+      }
+
+      if (start >= end) {
+        throw new ValidationError("End date must be after start date")
+      }
+
       // Get busy times from calendar
       const busyTimes = await this.getBusyTimes(startDate, endDate)
 
-      // Generate available time slots based on business hours and busy times
+      // Generate available time slots
       return this.generateAvailableSlots(startDate, endDate, duration, busyTimes)
     } catch (error) {
-      console.error("Error fetching available slots:", error)
-      // Return empty array instead of throwing to prevent service disruption
-      return []
+      if (error instanceof ValidationError || error instanceof ConfigurationError) {
+        throw error
+      }
+
+      throw new ExternalServiceError("Failed to fetch available slots", "Google Calendar", { originalError: error })
     }
   }
 
+  /**
+   * Get busy times from the calendar
+   * @private
+   */
   private async getBusyTimes(startDate: string, endDate: string): Promise<{ start: string; end: string }[]> {
     try {
       this.validateCalendarClient()
-
-      const calendarId = process.env.GOOGLE_CALENDAR_ID
-      if (!calendarId) {
-        throw new Error("Missing GOOGLE_CALENDAR_ID environment variable")
-      }
 
       const response = await this.calendar!.freebusy.query({
         requestBody: {
           timeMin: startDate,
           timeMax: endDate,
-          items: [{ id: calendarId }],
+          items: [{ id: this.config.GOOGLE_CALENDAR_ID }],
         },
       })
 
-      const busyTimes = response.data.calendars?.[calendarId]?.busy || []
+      const busyTimes = response.data.calendars?.[this.config.GOOGLE_CALENDAR_ID]?.busy || []
       return busyTimes.map((time) => ({
         start: time.start || "",
         end: time.end || "",
       }))
     } catch (error) {
-      console.error("Error fetching busy times:", error)
-      return []
+      throw new ExternalServiceError("Failed to fetch busy times from calendar", "Google Calendar", {
+        originalError: error,
+      })
     }
   }
 
+  /**
+   * Generate available time slots based on business hours and busy times
+   * @private
+   */
   private generateAvailableSlots(
     startDate: string,
     endDate: string,
@@ -127,8 +152,8 @@ export class GoogleCalendarClient {
     // Loop through each day
     const currentDate = new Date(startDateTime)
     while (currentDate <= endDateTime) {
+      // Skip weekends (0 = Sunday, 6 = Saturday)
       if (currentDate.getDay() !== 0 && currentDate.getDay() !== 6) {
-        // Skip weekends
         // Business hours: 9 AM to 5 PM
         const businessStart = new Date(currentDate)
         businessStart.setHours(9, 0, 0, 0)
@@ -175,6 +200,15 @@ export class GoogleCalendarClient {
     return slots
   }
 
+  /**
+   * Create a new calendar event
+   * @param summary - Event title
+   * @param description - Event description
+   * @param startTime - Start time in ISO format
+   * @param endTime - End time in ISO format
+   * @param attendeeEmail - Optional attendee email
+   * @returns Google Calendar event ID
+   */
   async createEvent(
     summary: string,
     description: string,
@@ -185,9 +219,9 @@ export class GoogleCalendarClient {
     try {
       this.validateCalendarClient()
 
-      const calendarId = process.env.GOOGLE_CALENDAR_ID
-      if (!calendarId) {
-        throw new Error("Missing GOOGLE_CALENDAR_ID environment variable")
+      // Validate inputs
+      if (!summary || !startTime || !endTime) {
+        throw new ValidationError("Summary, start time, and end time are required")
       }
 
       const event: calendar_v3.Schema$Event = {
@@ -208,17 +242,29 @@ export class GoogleCalendarClient {
       }
 
       const response = await this.calendar!.events.insert({
-        calendarId,
+        calendarId: this.config.GOOGLE_CALENDAR_ID,
         requestBody: event,
       })
 
-      return response.data.id || ""
+      if (!response.data.id) {
+        throw new ExternalServiceError("Failed to create calendar event - no event ID returned", "Google Calendar")
+      }
+
+      return response.data.id
     } catch (error) {
-      console.error("Error creating event:", error)
-      throw new Error("Failed to create calendar event")
+      if (error instanceof ValidationError || error instanceof ExternalServiceError) {
+        throw error
+      }
+
+      throw new ExternalServiceError("Failed to create calendar event", "Google Calendar", { originalError: error })
     }
   }
 
+  /**
+   * Update an existing calendar event
+   * @param eventId - Google Calendar event ID
+   * @param updates - Fields to update
+   */
   async updateEvent(
     eventId: string,
     updates: {
@@ -232,9 +278,8 @@ export class GoogleCalendarClient {
     try {
       this.validateCalendarClient()
 
-      const calendarId = process.env.GOOGLE_CALENDAR_ID
-      if (!calendarId) {
-        throw new Error("Missing GOOGLE_CALENDAR_ID environment variable")
+      if (!eventId) {
+        throw new ValidationError("Event ID is required")
       }
 
       const event: calendar_v3.Schema$Event = {}
@@ -256,102 +301,84 @@ export class GoogleCalendarClient {
       if (updates.status) event.status = updates.status
 
       await this.calendar!.events.patch({
-        calendarId,
+        calendarId: this.config.GOOGLE_CALENDAR_ID,
         eventId,
         requestBody: event,
       })
     } catch (error) {
-      console.error("Error updating event:", error)
-      throw new Error("Failed to update calendar event")
+      if (error instanceof ValidationError) {
+        throw error
+      }
+
+      // Check if it's a 404 error
+      if ((error as any)?.response?.status === 404) {
+        throw new NotFoundError(`Calendar event not found: ${eventId}`)
+      }
+
+      throw new ExternalServiceError("Failed to update calendar event", "Google Calendar", { originalError: error })
     }
   }
 
+  /**
+   * Delete a calendar event
+   * @param eventId - Google Calendar event ID
+   */
   async deleteEvent(eventId: string): Promise<void> {
     try {
       this.validateCalendarClient()
 
-      const calendarId = process.env.GOOGLE_CALENDAR_ID
-      if (!calendarId) {
-        throw new Error("Missing GOOGLE_CALENDAR_ID environment variable")
+      if (!eventId) {
+        throw new ValidationError("Event ID is required")
       }
 
       await this.calendar!.events.delete({
-        calendarId,
+        calendarId: this.config.GOOGLE_CALENDAR_ID,
         eventId,
       })
     } catch (error) {
-      console.error("Error deleting event:", error)
-      throw new Error("Failed to delete calendar event")
-    }
-  }
-
-  async watchCalendar(
-    channelId: string,
-    address: string,
-    expiration?: string,
-  ): Promise<{ resourceId: string; expiration: string }> {
-    try {
-      this.validateCalendarClient()
-
-      const calendarId = process.env.GOOGLE_CALENDAR_ID
-      if (!calendarId) {
-        throw new Error("Missing GOOGLE_CALENDAR_ID environment variable")
+      if (error instanceof ValidationError) {
+        throw error
       }
 
-      const response = await this.calendar!.events.watch({
-        calendarId,
-        requestBody: {
-          id: channelId,
-          type: "web_hook",
-          address,
-          expiration,
-        },
-      })
-
-      return {
-        resourceId: response.data.resourceId || "",
-        expiration: response.data.expiration || "",
+      // Check if it's a 404 error
+      if ((error as any)?.response?.status === 404) {
+        throw new NotFoundError(`Calendar event not found: ${eventId}`)
       }
-    } catch (error) {
-      console.error("Error setting up calendar watch:", error)
-      throw new Error("Failed to set up calendar watch")
+
+      throw new ExternalServiceError("Failed to delete calendar event", "Google Calendar", { originalError: error })
     }
   }
 
-  async stopWatch(channelId: string, resourceId: string): Promise<void> {
-    try {
-      this.validateCalendarClient()
-
-      await this.calendar!.channels.stop({
-        requestBody: {
-          id: channelId,
-          resourceId,
-        },
-      })
-    } catch (error) {
-      console.error("Error stopping calendar watch:", error)
-      throw new Error("Failed to stop calendar watch")
-    }
-  }
-
+  /**
+   * Get a specific calendar event
+   * @param eventId - Google Calendar event ID
+   * @returns Calendar event details
+   */
   async getEvent(eventId: string): Promise<calendar_v3.Schema$Event> {
     try {
       this.validateCalendarClient()
 
-      const calendarId = process.env.GOOGLE_CALENDAR_ID
-      if (!calendarId) {
-        throw new Error("Missing GOOGLE_CALENDAR_ID environment variable")
+      if (!eventId) {
+        throw new ValidationError("Event ID is required")
       }
 
       const response = await this.calendar!.events.get({
-        calendarId,
+        calendarId: this.config.GOOGLE_CALENDAR_ID,
         eventId,
       })
 
       return response.data
     } catch (error) {
-      console.error("Error getting event:", error)
-      throw new Error("Failed to get calendar event")
+      if (error instanceof ValidationError) {
+        throw error
+      }
+
+      // Check if it's a 404 error
+      if ((error as any)?.response?.status === 404) {
+        throw new NotFoundError(`Calendar event not found: ${eventId}`)
+      }
+
+      throw new ExternalServiceError("Failed to get calendar event", "Google Calendar", { originalError: error })
     }
   }
 }
