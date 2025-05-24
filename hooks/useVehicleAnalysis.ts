@@ -9,7 +9,7 @@ interface AnalysisResult {
   detailedAnalysis: string[]
 }
 
-const useVehicleAnalysis = (imageUrls: string[]) => {
+export function useVehicleAnalysis(imageUrls: string[]) {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [result, setResult] = useState<AnalysisResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -47,4 +47,5 @@ const useVehicleAnalysis = (imageUrls: string[]) => {
   return { isAnalyzing, result, error, startAnalysis }
 }
 
+// Default export for backward compatibility
 export default useVehicleAnalysis
