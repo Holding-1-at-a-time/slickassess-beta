@@ -116,16 +116,13 @@ export default function AssessmentTemplatePage() {
     setTemplate((prev) => {
       if (!prev) return prev
 
-      const newTemplate = { ...prev }
-      const sectionIndex = newTemplate.sections.findIndex((s) => s.id === sectionId)
+      const sectionExists = prev.sections.some((s) => s.id === sectionId)
+      const filteredSections = prev.sections.filter((s) => s.id !== sectionId)
+      const newTemplate = { ...prev, sections: filteredSections }
 
-      if (sectionIndex !== -1) {
-        newTemplate.sections.splice(sectionIndex, 1)
-
-        // Set active section to first section if the active section was removed
-        if (activeSection === sectionId && newTemplate.sections.length > 0) {
-          setActiveSection(newTemplate.sections[0].id)
-        }
+      // Set active section to first section if the active section was removed
+      if (sectionExists && activeSection === sectionId && filteredSections.length > 0) {
+        setActiveSection(filteredSections[0].id)
       }
 
       return newTemplate
